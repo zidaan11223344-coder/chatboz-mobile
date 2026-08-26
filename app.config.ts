@@ -89,7 +89,13 @@ const config: ExpoConfig = {
     [
       "expo-audio",
       {
-        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
+        microphonePermission: "اسمح لـ $(PRODUCT_NAME) بالوصول إلى الميكروفون لإرسال بصمات صوتية.",
+      },
+    ],
+    [
+      "expo-image-picker",
+      {
+        photosPermission: "اسمح لـ $(PRODUCT_NAME) بالوصول إلى الصور لإرفاقها في المحادثات.",
       },
     ],
     [

@@ -1,51 +1,26 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Avatar, PointsPill, SectionTitle, Tag, buzzColors, buzzHaptic } from "@/components/buzz-ui";
+import { Avatar, buzzColors } from "@/components/buzz-ui";
 import { ScreenContainer } from "@/components/screen-container";
-import { useChatBuzz } from "@/lib/chat-buzz-store";
-
-function SettingRow({ icon, title, subtitle, onPress, accent = buzzColors.indigo }: { icon: keyof typeof MaterialIcons.glyphMap; title: string; subtitle: string; onPress?: () => void; accent?: string }) {
-  return <Pressable onPress={() => { buzzHaptic(); onPress?.(); }} style={({ pressed }) => [styles.settingRow, pressed && styles.pressed]}><View style={[styles.settingIcon, { backgroundColor: `${accent}15` }]}><MaterialIcons name={icon} size={20} color={accent} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>{title}</Text><Text numberOfLines={1} style={styles.settingSubtitle}>{subtitle}</Text></View><MaterialIcons name="chevron-left" size={23} color="#ACACBC" /></Pressable>;
-}
+import { startOAuthLogin } from "@/constants/oauth";
+import { useAuth } from "@/hooks/use-auth";
+import { trpc } from "@/lib/trpc";
 
 export default function ProfileScreen() {
-  const { profile, serverSettings, token, logout } = useChatBuzz();
-  const connected = Boolean(serverSettings.apiBaseUrl);
-  return <ScreenContainer edges={["top", "left", "right"]}><ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}><View style={styles.header}><Text style={styles.heading}>ملفي</Text><Pressable onPress={() => { buzzHaptic(); router.push("/settings"); }} style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}><MaterialIcons name="settings" size={22} color={buzzColors.indigo} /></Pressable></View><View style={styles.profileCard}><View style={styles.profileTop}><Avatar initials={profile.initials} tint={buzzColors.indigo} size={70} live /><View style={styles.profileCopy}><Text style={styles.profileName}>{profile.name}</Text><Text style={styles.handle}>{profile.handle}</Text><View style={styles.badgeRow}><Tag color={buzzColors.coral}>عضو مبكر</Tag><Tag color={buzzColors.indigo}>مستكشف</Tag>{["owner", "admin", "assistant"].includes(profile.role) ? <Tag color={buzzColors.green}>{profile.role === "owner" ? "مالك التطبيق" : profile.role === "admin" ? "مدير" : "مساعد"}</Tag> : null}</View></View></View><View style={styles.divider} /><View style={styles.stats}><View style={styles.stat}><Text style={styles.statValue}>12</Text><Text style={styles.statLabel}>غرفة زرتها</Text></View><View style={styles.statDivider} /><View style={styles.stat}><Text style={styles.statValue}>4</Text><Text style={styles.statLabel}>أصدقاء جدد</Text></View><View style={styles.statDivider} /><View style={styles.stat}><Text style={styles.statValue}>7</Text><Text style={styles.statLabel}>شارات</Text></View></View></View><View style={styles.pointsCard}><View style={styles.pointsIcon}><MaterialIcons name="diamond" size={23} color="#D79815" /></View><View style={styles.pointsCopy}><Text style={styles.pointsTitle}>رصيدك في شات بوز</Text><Text style={styles.pointsCaption}>استخدم النقاط لإرسال الهدايا</Text></View><PointsPill points={profile.points} /></View><SectionTitle title="إعداداتك" /><View style={styles.settingsCard}>{token && ["owner", "admin", "assistant"].includes(profile.role) ? <><SettingRow icon="admin-panel-settings" title="لوحة الإدارة" subtitle={profile.role === "owner" ? "إدارة المستخدمين والغرف والصلاحيات" : "أدوات الإدارة المتاحة لك"} onPress={() => router.push("/admin")} accent={buzzColors.green} /><View style={styles.line} /></> : null}<SettingRow icon={token ? "logout" : "login"} title={token ? "تسجيل الخروج" : "تسجيل الدخول"} subtitle={token ? `متصل بالحساب ${profile.handle}` : "استخدم حسابك لمزامنة النقاط والغرف"} onPress={() => token ? void logout() : router.push("/login")} accent={token ? buzzColors.coral : buzzColors.indigo} /><View style={styles.line} /><SettingRow icon="dns" title="السيرفر الخاص" subtitle={connected ? "تم حفظ عنوان الخادم" : "أضف API وخدمة الصوت"} onPress={() => router.push("/settings")} accent={connected ? buzzColors.green : buzzColors.indigo} /><View style={styles.line} /><SettingRow icon="notifications-none" title="الإشعارات" subtitle="الغرف والرسائل والهدايا" onPress={() => undefined} /><View style={styles.line} /><SettingRow icon="help-outline" title="المساعدة والخصوصية" subtitle="قواعد المجتمع وإدارة الحساب" onPress={() => undefined} accent={buzzColors.coral} /></View><View style={styles.serverHint}><MaterialIcons name={connected ? "check-circle" : "info-outline"} size={17} color={connected ? buzzColors.green : buzzColors.indigo} /><Text style={styles.serverHintText}>{token ? "الجلسة محفوظة بأمان على هذا الجهاز." : connected ? "الخادم مضبوط؛ سجّل الدخول لمزامنة حسابك." : "أضف عنوان سيرفرك لربط شات بوز بالخدمة الخاصة."}</Text></View></ScrollView></ScreenContainer>;
+  const { user, loading, isAuthenticated, logout } = useAuth();
+  const rooms = trpc.social.rooms.list.useQuery(undefined, { enabled: isAuthenticated });
+  const friends = trpc.social.friends.list.useQuery(undefined, { enabled: isAuthenticated });
+  const conversations = trpc.social.conversations.list.useQuery(undefined, { enabled: isAuthenticated });
+  if (loading) return <ScreenContainer className="items-center justify-center"><ActivityIndicator color={buzzColors.indigo} /></ScreenContainer>;
+  if (!isAuthenticated) return <ScreenContainer className="items-center justify-center px-6"><View style={styles.lock}><MaterialIcons name="lock-outline" size={31} color="#FFFFFF" /></View><Text style={styles.emptyTitle}>حسابك مطلوب</Text><Text style={styles.emptyCopy}>سجّل الدخول لاستخدام الغرف والأصدقاء والدردشات بحسابك الحقيقي.</Text><Pressable onPress={() => void startOAuthLogin()} style={({ pressed }) => [styles.primary, pressed && styles.pressed]}><Text style={styles.primaryText}>تسجيل الدخول</Text></Pressable></ScreenContainer>;
+  const name = user?.name?.trim() || "حساب شات باز";
+  const initials = name.slice(0, 1) || "؟";
+  const ownedRooms = (rooms.data ?? []).filter((room) => room.owner.id === user?.id).length;
+  return <ScreenContainer edges={["top", "left", "right"]}><ScrollView contentContainerStyle={styles.scroll}><View style={styles.header}><Pressable onPress={() => router.push("/settings")} style={styles.iconButton}><MaterialIcons name="settings" color={buzzColors.indigo} size={22} /></Pressable><Text style={styles.heading}>ملفي</Text></View><View style={styles.card}><Avatar initials={initials} tint={buzzColors.indigo} size={72} /><Text style={styles.name}>{name}</Text><Text style={styles.caption}>حساب موثّق في شات باز</Text><View style={styles.stats}><Stat value={ownedRooms} label="غرف أنشأتها" /><View style={styles.divider} /><Stat value={(friends.data ?? []).length} label="أصدقاء" /><View style={styles.divider} /><Stat value={(conversations.data ?? []).length} label="دردشات" /></View></View><View style={styles.notice}><MaterialIcons name="verified-user" color={buzzColors.indigo} size={21} /><Text style={styles.noticeText}>يعرض شات باز المحتوى الذي تنشئه الحسابات المسجّلة فقط؛ لا توجد بيانات تجريبية في حسابك.</Text></View><Pressable onPress={() => void logout()} style={({ pressed }) => [styles.logout, pressed && styles.pressed]}><MaterialIcons name="logout" color="#C94458" size={21} /><Text style={styles.logoutText}>تسجيل الخروج</Text></Pressable></ScrollView></ScreenContainer>;
 }
 
-const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 30 },
-  header: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
-  heading: { fontSize: 27, lineHeight: 36, fontWeight: "900", color: buzzColors.ink, writingDirection: "rtl" },
-  headerButton: { width: 42, height: 42, borderWidth: 1, borderColor: buzzColors.border, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" },
-  profileCard: { backgroundColor: "#FFFFFF", borderRadius: 23, padding: 18, borderWidth: 1, borderColor: "#ECECF3" },
-  profileTop: { flexDirection: "row-reverse", alignItems: "center", gap: 13 },
-  profileCopy: { alignItems: "flex-end", flex: 1 },
-  profileName: { color: buzzColors.ink, fontSize: 21, fontWeight: "900", writingDirection: "rtl" },
-  handle: { color: buzzColors.muted, fontSize: 13, marginTop: 2 },
-  badgeRow: { marginTop: 9, flexDirection: "row-reverse", gap: 6 },
-  divider: { height: 1, backgroundColor: "#F0F0F5", marginVertical: 17 },
-  stats: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center" },
-  stat: { alignItems: "center", flex: 1 },
-  statValue: { color: buzzColors.ink, fontSize: 18, fontWeight: "900" },
-  statLabel: { color: buzzColors.muted, fontSize: 10, marginTop: 3, writingDirection: "rtl" },
-  statDivider: { width: 1, height: 27, backgroundColor: "#EEEEF4" },
-  pointsCard: { marginTop: 13, flexDirection: "row-reverse", alignItems: "center", gap: 11, backgroundColor: "#FFF8E8", borderRadius: 19, padding: 14, borderWidth: 1, borderColor: "#F8E8BE" },
-  pointsIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
-  pointsCopy: { flex: 1, alignItems: "flex-end" },
-  pointsTitle: { color: "#5E4B1F", fontSize: 14, fontWeight: "800", writingDirection: "rtl", textAlign: "right" },
-  pointsCaption: { color: "#9A7A35", fontSize: 11, marginTop: 2, writingDirection: "rtl", textAlign: "right" },
-  settingsCard: { borderRadius: 21, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#ECECF3", overflow: "hidden" },
-  settingRow: { flexDirection: "row-reverse", alignItems: "center", gap: 12, padding: 14 },
-  settingIcon: { width: 39, height: 39, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-  settingCopy: { flex: 1, alignItems: "flex-end" },
-  settingTitle: { color: buzzColors.ink, fontSize: 14, fontWeight: "800", writingDirection: "rtl" },
-  settingSubtitle: { color: buzzColors.muted, fontSize: 11, marginTop: 2, writingDirection: "rtl", textAlign: "right" },
-  line: { height: 1, backgroundColor: "#F0F0F5", marginRight: 65 },
-  serverHint: { flexDirection: "row-reverse", alignItems: "flex-start", gap: 7, backgroundColor: "#F2F1FF", borderRadius: 15, padding: 12, marginTop: 13 },
-  serverHintText: { color: "#55549C", lineHeight: 19, fontSize: 12, flex: 1, writingDirection: "rtl", textAlign: "right" },
-  pressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
-});
+function Stat({ value, label }: { value: number; label: string }) { return <View style={styles.stat}><Text style={styles.statValue}>{value}</Text><Text style={styles.statLabel}>{label}</Text></View>; }
+
+const styles = StyleSheet.create({ scroll: { padding: 18, paddingTop: 9, paddingBottom: 35 }, header: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }, heading: { color: buzzColors.ink, fontSize: 28, fontWeight: "900", writingDirection: "rtl" }, iconButton: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#ECECF3", alignItems: "center", justifyContent: "center" }, card: { alignItems: "center", backgroundColor: "#FFFFFF", borderRadius: 24, padding: 22, borderWidth: 1, borderColor: "#ECECF3" }, name: { color: buzzColors.ink, fontSize: 21, fontWeight: "900", marginTop: 12, writingDirection: "rtl" }, caption: { color: buzzColors.muted, fontSize: 12, marginTop: 4, writingDirection: "rtl" }, stats: { alignSelf: "stretch", flexDirection: "row-reverse", alignItems: "center", marginTop: 20, paddingTop: 17, borderTopWidth: 1, borderTopColor: "#F0F0F5" }, stat: { flex: 1, alignItems: "center" }, statValue: { color: buzzColors.ink, fontSize: 19, fontWeight: "900" }, statLabel: { color: buzzColors.muted, fontSize: 10, marginTop: 4, writingDirection: "rtl", textAlign: "center" }, divider: { height: 29, width: 1, backgroundColor: "#E9E9F0" }, notice: { marginTop: 14, backgroundColor: "#EFEEFF", padding: 14, borderRadius: 17, flexDirection: "row-reverse", gap: 8, alignItems: "flex-start" }, noticeText: { flex: 1, color: "#56558B", fontSize: 12, lineHeight: 19, textAlign: "right", writingDirection: "rtl" }, logout: { marginTop: 14, height: 51, backgroundColor: "#FFF0F2", borderRadius: 16, flexDirection: "row-reverse", gap: 8, alignItems: "center", justifyContent: "center" }, logoutText: { color: "#C94458", fontSize: 14, fontWeight: "900", writingDirection: "rtl" }, lock: { width: 74, height: 74, borderRadius: 27, backgroundColor: buzzColors.indigo, alignItems: "center", justifyContent: "center" }, emptyTitle: { color: buzzColors.ink, fontSize: 21, fontWeight: "900", marginTop: 16, writingDirection: "rtl" }, emptyCopy: { color: buzzColors.muted, fontSize: 13, lineHeight: 22, marginTop: 7, textAlign: "center", writingDirection: "rtl" }, primary: { marginTop: 18, height: 49, paddingHorizontal: 20, borderRadius: 16, backgroundColor: buzzColors.indigo, alignItems: "center", justifyContent: "center" }, primaryText: { color: "#FFFFFF", fontSize: 14, fontWeight: "900", writingDirection: "rtl" }, pressed: { opacity: 0.72, transform: [{ scale: 0.98 }] } });

@@ -1,107 +1,34 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Avatar, GiftPicker, IconCircle, PointsPill, Tag, buzzColors, buzzHaptic } from "@/components/buzz-ui";
+import { Avatar, buzzColors, buzzHaptic } from "@/components/buzz-ui";
 import { ScreenContainer } from "@/components/screen-container";
-import { liveApi } from "@/lib/chat-buzz-api";
-import { useChatBuzz } from "@/lib/chat-buzz-store";
-
-const audience = [
-  { name: "عمر", initials: "ع", tint: "#4F9CDC" },
-  { name: "عبير", initials: "ع", tint: "#ED819C" },
-  { name: "راكان", initials: "ر", tint: "#8A6BD1" },
-  { name: "سارة", initials: "س", tint: "#4CAD87" },
-  { name: "مازن", initials: "م", tint: "#C9824B" },
-  { name: "شهد", initials: "ش", tint: "#CF70AB" },
-];
+import { useAuth } from "@/hooks/use-auth";
+import { trpc } from "@/lib/trpc";
 
 export default function VoiceRoomScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { rooms, profile, token, serverSettings } = useChatBuzz();
-  const room = useMemo(() => rooms.find((item) => item.id === id) ?? rooms[0], [id, rooms]);
-  const [raisedHand, setRaisedHand] = useState(false);
-  const [muted, setMuted] = useState(true);
-  const [giftsOpen, setGiftsOpen] = useState(false);
+  const { isAuthenticated } = useAuth();
+  const roomsQuery = trpc.social.rooms.list.useQuery(undefined, { enabled: isAuthenticated });
+  const joinRoom = trpc.social.rooms.join.useMutation();
+  const room = roomsQuery.data?.find((item) => item.id === id);
 
-  useEffect(() => {
-    if (!token || !serverSettings.apiBaseUrl || !room?.id) return;
-    void liveApi.joinRoom(serverSettings.apiBaseUrl, token, room.id).catch(() => undefined);
-    return () => { void liveApi.leaveRoom(serverSettings.apiBaseUrl, token, room.id).catch(() => undefined); };
-  }, [token, serverSettings.apiBaseUrl, room?.id]);
-
-  const toggleHand = () => {
-    buzzHaptic();
-    const next = !raisedHand;
-    setRaisedHand(next);
-    if (next) Alert.alert("تم رفع يدك", "سيظهر طلبك للمضيف. عند قبول الطلب تستطيع التحدث من الميكروفون الحقيقي بعد ربط السيرفر.");
+  const join = async () => {
+    if (!room) return;
+    try {
+      await joinRoom.mutateAsync({ roomId: room.id });
+      buzzHaptic();
+      await roomsQuery.refetch();
+    } catch (error) {
+      Alert.alert("تعذر دخول الغرفة", error instanceof Error ? error.message : "حاول مرة أخرى.");
+    }
   };
 
-  if (!room) return null;
-  return <ScreenContainer edges={["top", "left", "right", "bottom"]} containerClassName="bg-background"><View style={styles.page}>
-    <View style={styles.topbar}><IconCircle icon="arrow-forward" label="العودة" onPress={() => router.back()} /><View style={styles.topMeta}><View style={styles.livePill}><View style={styles.liveDot} /><Text style={styles.liveText}>مباشر</Text></View><PointsPill points={profile.points} /></View></View>
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-      <View style={[styles.roomHero, { backgroundColor: room.tint }]}><View style={styles.roomHeroCopy}><Text style={styles.roomTitle}>{room.title}</Text><Text style={styles.roomTopic}>{room.topic}</Text><View style={styles.hostLine}><Avatar initials={room.speakers[0]?.initials ?? "ل"} tint={room.speakers[0]?.tint ?? buzzColors.indigo} size={26} /><Text style={styles.hostText}>تقديم {room.host}</Text></View></View><View style={styles.audienceCount}><MaterialIcons name="headset-mic" size={20} color={buzzColors.indigo} /><Text style={styles.audienceNumber}>{room.audienceCount}</Text><Text style={styles.audienceLabel}>مستمع</Text></View></View>
-      <View style={styles.stageHeader}><Text style={styles.stageTitle}>المسرح</Text><Text style={styles.stageHint}>اضغط على مقعد لمعرفة حالة المتحدث</Text></View>
-      <View style={styles.seatGrid}>{room.speakers.map((speaker) => <Pressable key={speaker.id} onPress={() => Alert.alert(speaker.name, speaker.speaking ? "يتحدث الآن في الغرفة" : "ينتظر دوره للحديث")} style={({ pressed }) => [styles.seat, speaker.speaking && styles.activeSeat, pressed && styles.pressed]}><View style={speaker.speaking ? styles.speakingRing : undefined}><Avatar initials={speaker.initials} tint={speaker.tint} size={57} /></View><Text style={styles.speakerName}>{speaker.name}</Text><Text style={[styles.speakerStatus, speaker.speaking && styles.speakingStatus]}>{speaker.speaking ? "يتحدث الآن" : "متحدث"}</Text></Pressable>)}</View>
-      <View style={styles.audienceHeader}><Text style={styles.stageTitle}>في الغرفة</Text><Tag color={buzzColors.green}>+ {room.audienceCount - room.speakers.length} مستمع</Tag></View>
-      <View style={styles.audienceList}>{audience.map((person) => <View key={person.name} style={styles.audiencePerson}><Avatar initials={person.initials} tint={person.tint} size={38} /><Text style={styles.audienceName}>{person.name}</Text></View>)}</View>
-      <View style={styles.quickChat}><View style={styles.quickChatHead}><Text style={styles.quickChatTitle}>دردشة الغرفة</Text><Text style={styles.quickChatCount}>12 رسالة جديدة</Text></View><Text style={styles.quickChatMessage}><Text style={styles.quickChatName}>نور: </Text>الجو في الغرفة لطيف جداً، استمروا!</Text><Pressable onPress={() => { buzzHaptic(); Alert.alert("دردشة الغرفة", "ستتصل هذه الدردشة بالسيرفر عند إعداد API الخاص بك."); }} style={({ pressed }) => [styles.openChat, pressed && styles.pressed]}><Text style={styles.openChatText}>فتح الدردشة</Text><MaterialIcons name="chat-bubble-outline" size={18} color={buzzColors.indigo} /></Pressable></View>
-    </ScrollView>
-    <View style={styles.controls}><Pressable onPress={() => { buzzHaptic(); setGiftsOpen(true); }} style={({ pressed }) => [styles.smallControl, pressed && styles.pressed]}><MaterialIcons name="redeem" size={22} color={buzzColors.coral} /><Text style={styles.controlCaption}>هدية</Text></Pressable><Pressable onPress={toggleHand} style={({ pressed }) => [styles.handControl, raisedHand && styles.handControlActive, pressed && styles.pressed]}><MaterialIcons name={raisedHand ? "back-hand" : "front-hand"} size={23} color={raisedHand ? "#FFFFFF" : buzzColors.indigo} /><Text style={[styles.handText, raisedHand && styles.handTextActive]}>{raisedHand ? "تم رفع اليد" : "رفع اليد"}</Text></Pressable><Pressable onPress={() => { buzzHaptic(); setMuted((current) => !current); }} style={({ pressed }) => [styles.micControl, !muted && styles.micControlActive, pressed && styles.pressed]}><MaterialIcons name={muted ? "mic-off" : "mic"} size={24} color={muted ? buzzColors.indigo : "#FFFFFF"} /></Pressable><Pressable onPress={() => { buzzHaptic(); router.back(); }} style={({ pressed }) => [styles.leaveControl, pressed && styles.pressed]}><MaterialIcons name="logout" size={22} color="#CF4056" /></Pressable></View>
-    <GiftPicker visible={giftsOpen} onClose={() => setGiftsOpen(false)} conversationId={`room-${room.id}`} recipient={room.host} recipientId={room.speakers[0]?.id} roomId={room.id} />
-  </View></ScreenContainer>;
+  if (roomsQuery.isLoading) return <ScreenContainer className="items-center justify-center"><ActivityIndicator color={buzzColors.indigo} /></ScreenContainer>;
+  if (!room) return <ScreenContainer className="items-center justify-center px-6"><MaterialIcons name="meeting-room" size={39} color="#A0A0AF" /><Text style={styles.missingTitle}>الغرفة غير متاحة</Text><Text style={styles.missingCopy}>قد تكون حُذفت أو لم تعد متاحة لحسابك.</Text><Pressable onPress={() => router.back()} style={styles.returnButton}><Text style={styles.returnText}>العودة إلى الغرف</Text></Pressable></ScreenContainer>;
+
+  return <ScreenContainer edges={["top", "left", "right", "bottom"]}><View style={styles.page}><View style={styles.topbar}><Pressable onPress={() => router.back()} style={styles.iconButton}><MaterialIcons name="arrow-forward" color={buzzColors.ink} size={24} /></Pressable><View style={styles.livePill}><View style={styles.liveDot} /><Text style={styles.liveText}>{room.isLive ? "مباشر" : "متوقفة"}</Text></View><View style={{ width: 42 }} /></View><ScrollView contentContainerStyle={styles.scroll}><View style={styles.hero}><Avatar initials={room.owner.name.slice(0, 1) || "؟"} tint={buzzColors.indigo} size={76} live={room.isLive} /><Text style={styles.title}>{room.title}</Text><Text style={styles.description}>{room.description || "غرفة أنشأها عضو في شات باز."}</Text><View style={styles.tags}><View style={styles.tag}><Text style={styles.tagText}>{room.category}</Text></View><View style={styles.tag}><MaterialIcons name="groups" size={16} color={buzzColors.indigo} /><Text style={styles.tagText}>{room.memberCount} عضو</Text></View></View></View><View style={styles.ownerCard}><Avatar initials={room.owner.name.slice(0, 1) || "؟"} tint="#EA8B63" size={52} /><View style={styles.ownerCopy}><Text style={styles.ownerLabel}>مالك الغرفة</Text><Text style={styles.ownerName}>{room.owner.name}</Text></View><MaterialIcons name="verified" color={buzzColors.indigo} size={21} /></View><View style={styles.chatCard}><View style={styles.chatIcon}><MaterialIcons name="chat-bubble-outline" size={25} color={buzzColors.indigo} /></View><Text style={styles.chatTitle}>دردشة الغرفة</Text><Text style={styles.chatCopy}>تظهر رسائل الأعضاء الحقيقيين فقط. لا توجد رسائل تجريبية في هذه الغرفة.</Text><Pressable disabled={!room.joined} onPress={() => room.joined ? router.push(`/room-chat/${room.id}`) : undefined} style={({ pressed }) => [styles.chatButton, !room.joined && styles.disabled, pressed && styles.pressed]}><Text style={styles.chatButtonText}>{room.joined ? "فتح الدردشة" : "انضم للدردشة أولًا"}</Text><MaterialIcons name="arrow-back" color="#FFFFFF" size={18} /></Pressable></View></ScrollView><View style={styles.bottom}><Pressable disabled={room.joined || joinRoom.isPending} onPress={() => void join()} style={({ pressed }) => [styles.joinButton, room.joined && styles.joinedButton, pressed && styles.pressed]}><MaterialIcons name={room.joined ? "check" : "login"} size={21} color={room.joined ? buzzColors.indigo : "#FFFFFF"} /><Text style={[styles.joinText, room.joined && styles.joinedText]}>{room.joined ? "أنت عضو في الغرفة" : joinRoom.isPending ? "جارٍ الانضمام..." : "انضم إلى الغرفة"}</Text></Pressable></View></View></ScreenContainer>;
 }
 
-const styles = StyleSheet.create({
-  page: { flex: 1 },
-  topbar: { paddingHorizontal: 18, paddingTop: 7, paddingBottom: 10, flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between" },
-  topMeta: { flexDirection: "row-reverse", alignItems: "center", gap: 8 },
-  livePill: { flexDirection: "row-reverse", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 7, borderRadius: 15, backgroundColor: "#E8FAF3" },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: buzzColors.green },
-  liveText: { color: buzzColors.green, fontSize: 11, fontWeight: "900", writingDirection: "rtl" },
-  scroll: { paddingHorizontal: 18, paddingBottom: 104 },
-  roomHero: { minHeight: 136, borderRadius: 23, padding: 18, flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between" },
-  roomHeroCopy: { alignItems: "flex-end", flex: 1, paddingLeft: 12 },
-  roomTitle: { color: buzzColors.ink, fontSize: 21, fontWeight: "900", lineHeight: 29, writingDirection: "rtl", textAlign: "right" },
-  roomTopic: { color: buzzColors.muted, fontSize: 12, lineHeight: 18, marginTop: 3, writingDirection: "rtl", textAlign: "right" },
-  hostLine: { flexDirection: "row-reverse", alignItems: "center", gap: 6, marginTop: 11 },
-  hostText: { color: buzzColors.ink, fontSize: 12, fontWeight: "800", writingDirection: "rtl" },
-  audienceCount: { width: 78, height: 78, borderRadius: 24, backgroundColor: "rgba(255,255,255,0.75)", alignItems: "center", justifyContent: "center" },
-  audienceNumber: { color: buzzColors.ink, fontSize: 19, fontWeight: "900", marginTop: 1 },
-  audienceLabel: { color: buzzColors.muted, fontSize: 10, writingDirection: "rtl" },
-  stageHeader: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center", marginTop: 23, marginBottom: 11 },
-  stageTitle: { color: buzzColors.ink, fontSize: 18, fontWeight: "900", writingDirection: "rtl" },
-  stageHint: { color: buzzColors.muted, fontSize: 11, writingDirection: "rtl" },
-  seatGrid: { flexDirection: "row-reverse", flexWrap: "wrap", justifyContent: "space-between", gap: 10 },
-  seat: { width: "48%", alignItems: "center", backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#ECECF3", borderRadius: 20, paddingVertical: 13 },
-  activeSeat: { borderColor: "#B9B8FF", backgroundColor: "#FAFAFF" },
-  speakingRing: { borderWidth: 3, borderColor: "#8E8DFF", borderRadius: 35, padding: 3 },
-  speakerName: { color: buzzColors.ink, fontSize: 14, fontWeight: "800", marginTop: 7, writingDirection: "rtl" },
-  speakerStatus: { color: buzzColors.muted, fontSize: 10, marginTop: 2, writingDirection: "rtl" },
-  speakingStatus: { color: buzzColors.indigo, fontWeight: "800" },
-  audienceHeader: { marginTop: 25, marginBottom: 11, flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between" },
-  audienceList: { flexDirection: "row-reverse", justifyContent: "space-between", backgroundColor: "#FFFFFF", borderRadius: 20, paddingHorizontal: 11, paddingVertical: 12, borderWidth: 1, borderColor: "#ECECF3" },
-  audiencePerson: { alignItems: "center", width: 44 },
-  audienceName: { color: buzzColors.muted, fontSize: 10, marginTop: 5, writingDirection: "rtl" },
-  quickChat: { marginTop: 20, borderRadius: 20, padding: 15, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#ECECF3" },
-  quickChatHead: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center" },
-  quickChatTitle: { color: buzzColors.ink, fontSize: 15, fontWeight: "900", writingDirection: "rtl" },
-  quickChatCount: { color: buzzColors.muted, fontSize: 10, writingDirection: "rtl" },
-  quickChatMessage: { color: buzzColors.muted, fontSize: 12, lineHeight: 19, writingDirection: "rtl", textAlign: "right", marginTop: 9 },
-  quickChatName: { color: buzzColors.indigo, fontWeight: "800" },
-  openChat: { marginTop: 12, flexDirection: "row-reverse", gap: 6, alignSelf: "flex-end", alignItems: "center" },
-  openChatText: { color: buzzColors.indigo, fontSize: 12, fontWeight: "800", writingDirection: "rtl" },
-  controls: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#FFFFFF", borderTopWidth: 1, borderTopColor: "#ECECF3", paddingHorizontal: 18, paddingTop: 10, paddingBottom: 14, flexDirection: "row-reverse", alignItems: "center", gap: 9 },
-  smallControl: { width: 47, height: 51, justifyContent: "center", alignItems: "center", borderRadius: 15, backgroundColor: "#FFF1ED" },
-  controlCaption: { color: buzzColors.coral, fontSize: 9, marginTop: 2, fontWeight: "800", writingDirection: "rtl" },
-  handControl: { height: 51, paddingHorizontal: 15, borderRadius: 15, backgroundColor: "#EFEEFF", flexDirection: "row-reverse", alignItems: "center", justifyContent: "center", gap: 6, flex: 1 },
-  handControlActive: { backgroundColor: buzzColors.indigo },
-  handText: { color: buzzColors.indigo, fontSize: 13, fontWeight: "900", writingDirection: "rtl" },
-  handTextActive: { color: "#FFFFFF" },
-  micControl: { width: 51, height: 51, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#EFEEFF" },
-  micControlActive: { backgroundColor: buzzColors.indigo },
-  leaveControl: { width: 45, height: 51, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0F2" },
-  pressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
-});
+const styles = StyleSheet.create({ page: { flex: 1 }, topbar: { height: 60, paddingHorizontal: 18, flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between" }, iconButton: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#ECECF3", alignItems: "center", justifyContent: "center" }, livePill: { flexDirection: "row-reverse", gap: 5, alignItems: "center", paddingHorizontal: 11, paddingVertical: 8, backgroundColor: "#E8FAF3", borderRadius: 14 }, liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: buzzColors.green }, liveText: { color: buzzColors.green, fontSize: 12, fontWeight: "900", writingDirection: "rtl" }, scroll: { paddingHorizontal: 18, paddingBottom: 98 }, hero: { alignItems: "center", backgroundColor: "#EFEEFF", borderRadius: 25, padding: 24 }, title: { marginTop: 13, color: buzzColors.ink, fontSize: 23, fontWeight: "900", writingDirection: "rtl", textAlign: "center" }, description: { marginTop: 7, color: buzzColors.muted, fontSize: 13, lineHeight: 21, writingDirection: "rtl", textAlign: "center" }, tags: { marginTop: 15, flexDirection: "row-reverse", gap: 8 }, tag: { height: 34, paddingHorizontal: 10, borderRadius: 12, backgroundColor: "#FFFFFF", flexDirection: "row-reverse", gap: 5, alignItems: "center" }, tagText: { color: buzzColors.indigo, fontSize: 11, fontWeight: "800", writingDirection: "rtl" }, ownerCard: { marginTop: 15, backgroundColor: "#FFFFFF", borderRadius: 20, padding: 14, flexDirection: "row-reverse", alignItems: "center", gap: 11, borderWidth: 1, borderColor: "#ECECF3" }, ownerCopy: { flex: 1, alignItems: "flex-end" }, ownerLabel: { color: buzzColors.muted, fontSize: 11, writingDirection: "rtl" }, ownerName: { color: buzzColors.ink, fontSize: 16, fontWeight: "900", marginTop: 3, writingDirection: "rtl" }, chatCard: { marginTop: 15, backgroundColor: "#FFFFFF", borderRadius: 22, padding: 19, borderWidth: 1, borderColor: "#ECECF3", alignItems: "center" }, chatIcon: { width: 52, height: 52, borderRadius: 18, backgroundColor: "#EFEEFF", alignItems: "center", justifyContent: "center" }, chatTitle: { color: buzzColors.ink, fontSize: 17, fontWeight: "900", marginTop: 10, writingDirection: "rtl" }, chatCopy: { color: buzzColors.muted, fontSize: 12, lineHeight: 19, marginTop: 4, writingDirection: "rtl", textAlign: "center" }, chatButton: { marginTop: 14, height: 45, paddingHorizontal: 16, borderRadius: 14, backgroundColor: buzzColors.indigo, flexDirection: "row-reverse", gap: 7, alignItems: "center", justifyContent: "center" }, chatButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "900", writingDirection: "rtl" }, bottom: { padding: 13, borderTopWidth: 1, borderTopColor: "#ECECF3", backgroundColor: "#FFFFFF" }, joinButton: { height: 52, backgroundColor: buzzColors.indigo, borderRadius: 16, flexDirection: "row-reverse", gap: 8, alignItems: "center", justifyContent: "center" }, joinedButton: { backgroundColor: "#EFEEFF" }, joinText: { color: "#FFFFFF", fontSize: 14, fontWeight: "900", writingDirection: "rtl" }, joinedText: { color: buzzColors.indigo }, missingTitle: { color: buzzColors.ink, fontSize: 20, fontWeight: "900", marginTop: 14, writingDirection: "rtl" }, missingCopy: { color: buzzColors.muted, fontSize: 13, marginTop: 6, writingDirection: "rtl" }, returnButton: { marginTop: 20, backgroundColor: buzzColors.indigo, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14 }, returnText: { color: "#FFFFFF", fontWeight: "900", writingDirection: "rtl" }, disabled: { opacity: 0.5 }, pressed: { opacity: 0.72, transform: [{ scale: 0.98 }] } });
