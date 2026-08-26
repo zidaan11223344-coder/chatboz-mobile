@@ -5,14 +5,13 @@ import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text,
 
 import { Avatar, buzzColors, buzzHaptic } from "@/components/buzz-ui";
 import { ScreenContainer } from "@/components/screen-container";
-import { getLoginUrl, startOAuthLogin } from "@/constants/oauth";
-import { useAuth } from "@/hooks/use-auth";
+import { useLocalAuth } from "@/hooks/use-local-auth";
 import { trpc } from "@/lib/trpc";
 
 const categories = ["عامة", "غرف صوتية", "موسيقى", "ألعاب", "ثقافة"];
 
 export default function RoomsScreen() {
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading } = useLocalAuth();
   const roomsQuery = trpc.social.rooms.list.useQuery(undefined, { enabled: isAuthenticated });
   const createRoom = trpc.social.rooms.create.useMutation();
   const joinRoom = trpc.social.rooms.join.useMutation();
@@ -21,13 +20,7 @@ export default function RoomsScreen() {
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState(categories[0]);
 
-  const beginLogin = async () => {
-    if (!getLoginUrl()) {
-      Alert.alert("تسجيل الدخول غير متاح", "أعد فتح التطبيق ثم حاول مجددًا.");
-      return;
-    }
-    await startOAuthLogin();
-  };
+  const beginLogin = () => router.push("/login");
 
   const create = async () => {
     try {

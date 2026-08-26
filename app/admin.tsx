@@ -1,40 +1,69 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router } from "expo-router";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { useMemo, useState } from "react";
+import { ActivityIndicator, Alert, Modal, Pressable, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { Avatar, buzzColors } from "@/components/buzz-ui";
 import { ScreenContainer } from "@/components/screen-container";
-import { buzzColors } from "@/components/buzz-ui";
-import { liveApi, type AdminSummary, type ApiUser } from "@/lib/chat-buzz-api";
-import { useChatBuzz } from "@/lib/chat-buzz-store";
+import { useLocalAuth } from "@/hooks/use-local-auth";
+import { trpc } from "@/lib/trpc";
+
+type AdminItem = { type: "user"; data: { id: number; username: string | null; name: string | null; role: "user" | "admin"; accountStatus: "active" | "disabled"; points: number } } | { type: "room"; data: { id: string; title: string; isLive: boolean; ownerId: number } };
 
 export default function AdminScreen() {
-  const { profile, token, serverSettings } = useChatBuzz();
-  const [summary, setSummary] = useState<AdminSummary | null>(null);
-  const [users, setUsers] = useState<ApiUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const allowed = ["owner", "admin", "assistant"].includes(profile.role);
+  const { user } = useLocalAuth();
+  const usersQuery = trpc.admin.users.useQuery(undefined, { enabled: user?.role === "admin" });
+  const roomsQuery = trpc.admin.rooms.useQuery(undefined, { enabled: user?.role === "admin" });
+  const createUser = trpc.admin.createUser.useMutation();
+  const deleteUser = trpc.admin.deleteUser.useMutation();
+  const closeRoom = trpc.admin.closeRoom.useMutation();
+  const deleteRoom = trpc.admin.deleteRoom.useMutation();
+  const transfer = trpc.admin.transferPoints.useMutation();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [transferUser, setTransferUser] = useState<{ id: number; name: string } | null>(null);
+  const [username, setUsername] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [points, setPoints] = useState("");
+  const [note, setNote] = useState("");
 
-  useEffect(() => {
-    if (!allowed || !token) { setLoading(false); return; }
-    Promise.all([
-      liveApi.adminSummary(serverSettings.apiBaseUrl, token),
-      profile.permissions.manage_users || profile.role !== "assistant" ? liveApi.adminUsers(serverSettings.apiBaseUrl, token) : Promise.resolve({ users: [] as ApiUser[] }),
-    ]).then(([summaryResult, usersResult]) => {
-      setSummary(summaryResult.summary);
-      setUsers(usersResult.users);
-    }).catch((cause) => setError(cause instanceof Error ? cause.message : "تعذر تحميل لوحة الإدارة.")).finally(() => setLoading(false));
-  }, [allowed, token, serverSettings.apiBaseUrl, profile.permissions.manage_users, profile.role]);
+  const sections = useMemo<{ title: string; data: AdminItem[] }[]>(() => [
+    { title: "الحسابات", data: (usersQuery.data ?? []).map((data) => ({ type: "user" as const, data })) },
+    { title: "الغرف", data: (roomsQuery.data ?? []).map((data) => ({ type: "room" as const, data })) },
+  ], [usersQuery.data, roomsQuery.data]);
 
-  if (!allowed || !token) return <ScreenContainer className="items-center justify-center p-6"><Text style={styles.denied}>هذه الصفحة متاحة للحسابات الإدارية فقط.</Text><Pressable onPress={() => router.replace("/login")} style={styles.button}><Text style={styles.buttonText}>تسجيل الدخول</Text></Pressable></ScreenContainer>;
-  return <ScreenContainer><FlatList data={users} keyExtractor={(item) => item.id} contentContainerStyle={styles.content} ListHeaderComponent={<>
-    <View style={styles.header}><Pressable onPress={() => router.back()}><MaterialIcons name="arrow-forward" size={25} color={buzzColors.ink} /></Pressable><View style={styles.headerCopy}><Text style={styles.title}>لوحة الإدارة</Text><Text style={styles.subtitle}>{profile.role === "owner" ? "مالك التطبيق" : "حساب إداري"}</Text></View></View>
-    {loading ? <ActivityIndicator color={buzzColors.indigo} style={styles.loader} /> : <>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <View style={styles.cards}>{[["المستخدمون", summary?.users ?? 0, "people"], ["الغرف", summary?.rooms ?? 0, "meeting-room"], ["غرف مباشرة", summary?.liveRooms ?? 0, "podcasts"]].map(([label, value, icon]) => <View key={String(label)} style={styles.stat}><MaterialIcons name={icon as keyof typeof MaterialIcons.glyphMap} size={21} color={buzzColors.indigo} /><Text style={styles.statValue}>{value}</Text><Text style={styles.statLabel}>{label}</Text></View>)}</View>
-      <Text style={styles.section}>المستخدمون</Text>
-    </>}</>} renderItem={({ item }) => <View style={styles.userRow}><View style={styles.avatar}><Text style={styles.avatarText}>{item.displayName.slice(0, 1)}</Text></View><View style={styles.userCopy}><Text style={styles.userName}>{item.displayName}</Text><Text style={styles.userHandle}>@{item.username} · {item.role === "owner" ? "المالك" : item.role === "assistant" ? "مساعد" : item.role === "admin" ? "مدير" : "مستخدم"}</Text></View>{item.role !== "user" ? <MaterialIcons name="verified" size={19} color={buzzColors.indigo} /> : null}</View>} ListEmptyComponent={!loading ? <Text style={styles.empty}>لا توجد بيانات مستخدمين متاحة لهذا الحساب.</Text> : null} /></ScreenContainer>;
+  const refresh = async () => { await Promise.all([usersQuery.refetch(), roomsQuery.refetch()]); };
+  const submitCreate = async () => {
+    try {
+      await createUser.mutateAsync({ username, name, password });
+      setCreateOpen(false); setUsername(""); setName(""); setPassword("");
+      await refresh();
+      Alert.alert("تم إنشاء الحساب", "تمت إضافة الحساب من دون أي نقاط أو محتوى تجريبي.");
+    } catch (error) { Alert.alert("تعذر إنشاء الحساب", error instanceof Error ? error.message : "حاول مرة أخرى."); }
+  };
+  const submitTransfer = async () => {
+    if (!transferUser) return;
+    try {
+      await transfer.mutateAsync({ recipientId: transferUser.id, amount: Number(points), note: note || undefined });
+      setTransferUser(null); setPoints(""); setNote("");
+      await refresh();
+      Alert.alert("تم التحويل", "تم تسجيل عملية تحويل النقاط.");
+    } catch (error) { Alert.alert("تعذر التحويل", error instanceof Error ? error.message : "تأكد من الرصيد وعدد النقاط."); }
+  };
+  const confirmDeleteUser = (target: { id: number; name: string | null }) => Alert.alert("حذف الحساب", `هل تريد حذف حساب ${target.name || "المستخدم"} وكل المحتوى المرتبط به؟`, [{ text: "إلغاء", style: "cancel" }, { text: "حذف", style: "destructive", onPress: () => void (async () => { try { await deleteUser.mutateAsync({ userId: target.id }); await refresh(); } catch (error) { Alert.alert("تعذر الحذف", error instanceof Error ? error.message : "حاول مرة أخرى."); } })() }]);
+  const confirmRoomAction = (room: { id: string; title: string }, action: "close" | "delete") => Alert.alert(action === "close" ? "إغلاق الغرفة" : "حذف الغرفة", action === "close" ? `هل تريد إغلاق غرفة «${room.title}»؟` : `هل تريد حذف غرفة «${room.title}» ورسائلها؟`, [{ text: "إلغاء", style: "cancel" }, { text: action === "close" ? "إغلاق" : "حذف", style: "destructive", onPress: () => void (async () => { try { if (action === "close") await closeRoom.mutateAsync({ roomId: room.id }); else await deleteRoom.mutateAsync({ roomId: room.id }); await refresh(); } catch (error) { Alert.alert("تعذر تنفيذ الإجراء", error instanceof Error ? error.message : "حاول مرة أخرى."); } })() }]);
+
+  if (user?.role !== "admin") return <ScreenContainer className="items-center justify-center px-6"><MaterialIcons name="admin-panel-settings" color="#A0A0B0" size={42} /><Text style={styles.denied}>هذه الصفحة متاحة لحساب المدير فقط.</Text><Pressable onPress={() => router.replace("/login")} style={styles.primary}><Text style={styles.primaryText}>تسجيل الدخول</Text></Pressable></ScreenContainer>;
+
+  return <ScreenContainer edges={["top", "left", "right", "bottom"]}><SectionList sections={sections} keyExtractor={(item, index) => `${item.type}-${item.data.id}-${index}`} contentContainerStyle={styles.content} ListHeaderComponent={<><View style={styles.header}><Pressable onPress={() => router.back()} style={styles.iconButton}><MaterialIcons name="arrow-forward" size={23} color={buzzColors.ink} /></Pressable><View style={styles.headerCopy}><Text style={styles.title}>لوحة المدير</Text><Text style={styles.subtitle}>إدارة الحسابات والغرف والنقاط</Text></View></View><View style={styles.summary}><View style={styles.summaryItem}><MaterialIcons name="people" size={20} color={buzzColors.indigo} /><Text style={styles.summaryValue}>{usersQuery.data?.length ?? 0}</Text><Text style={styles.summaryLabel}>الحسابات</Text></View><View style={styles.summaryItem}><MaterialIcons name="hub" size={20} color={buzzColors.indigo} /><Text style={styles.summaryValue}>{roomsQuery.data?.length ?? 0}</Text><Text style={styles.summaryLabel}>الغرف</Text></View><View style={styles.summaryItem}><MaterialIcons name="diamond" size={20} color="#C58A13" /><Text style={styles.summaryValue}>{user.points}</Text><Text style={styles.summaryLabel}>رصيد المدير</Text></View></View><Pressable onPress={() => setCreateOpen(true)} style={({ pressed }) => [styles.create, pressed && styles.pressed]}><MaterialIcons name="person-add-alt-1" size={21} color="#FFFFFF" /><Text style={styles.createText}>إنشاء حساب عربي</Text></Pressable></>} renderSectionHeader={({ section }) => <Text style={styles.sectionTitle}>{section.title}</Text>} renderItem={({ item }) => <AdminRow item={item} currentUserId={user.id} onTransfer={(target) => setTransferUser(target)} onDeleteUser={confirmDeleteUser} onRoomAction={confirmRoomAction} />} ListEmptyComponent={usersQuery.isLoading || roomsQuery.isLoading ? <ActivityIndicator color={buzzColors.indigo} style={{ marginTop: 50 }} /> : null} />
+    <Modal visible={createOpen} transparent animationType="fade" onRequestClose={() => setCreateOpen(false)}><View style={styles.shade}><View style={styles.sheet}><Text style={styles.sheetTitle}>إنشاء حساب</Text><TextInput value={name} onChangeText={setName} placeholder="الاسم الظاهر بالعربية" placeholderTextColor="#A5A5B5" style={styles.input} textAlign="right" /><TextInput value={username} onChangeText={setUsername} placeholder="اسم المستخدم" placeholderTextColor="#A5A5B5" style={styles.input} textAlign="right" autoCapitalize="none" /><TextInput value={password} onChangeText={setPassword} placeholder="كلمة مرور أولية" placeholderTextColor="#A5A5B5" style={styles.input} textAlign="right" secureTextEntry /><Pressable disabled={createUser.isPending} onPress={() => void submitCreate()} style={({ pressed }) => [styles.primary, createUser.isPending && styles.disabled, pressed && styles.pressed]}><Text style={styles.primaryText}>{createUser.isPending ? "جارٍ الإنشاء..." : "إنشاء الحساب"}</Text></Pressable><Pressable onPress={() => setCreateOpen(false)} style={styles.cancel}><Text style={styles.cancelText}>إلغاء</Text></Pressable></View></View></Modal>
+    <Modal visible={Boolean(transferUser)} transparent animationType="fade" onRequestClose={() => setTransferUser(null)}><View style={styles.shade}><View style={styles.sheet}><Text style={styles.sheetTitle}>تحويل نقاط</Text><Text style={styles.sheetCopy}>إلى {transferUser?.name || "الحساب"}</Text><TextInput value={points} onChangeText={setPoints} placeholder="عدد النقاط" placeholderTextColor="#A5A5B5" style={styles.input} textAlign="right" keyboardType="number-pad" /><TextInput value={note} onChangeText={setNote} placeholder="ملاحظة (اختيارية)" placeholderTextColor="#A5A5B5" style={styles.input} textAlign="right" /><Pressable disabled={transfer.isPending || !Number(points)} onPress={() => void submitTransfer()} style={({ pressed }) => [styles.primary, (transfer.isPending || !Number(points)) && styles.disabled, pressed && styles.pressed]}><Text style={styles.primaryText}>{transfer.isPending ? "جارٍ التحويل..." : "تحويل النقاط"}</Text></Pressable><Pressable onPress={() => setTransferUser(null)} style={styles.cancel}><Text style={styles.cancelText}>إلغاء</Text></Pressable></View></View></Modal>
+  </ScreenContainer>;
 }
 
-const styles = StyleSheet.create({ content: { padding: 18, paddingBottom: 35 }, header: { flexDirection: "row-reverse", alignItems: "center", gap: 14, marginBottom: 20 }, headerCopy: { flex: 1, alignItems: "flex-end" }, title: { fontSize: 27, fontWeight: "900", color: buzzColors.ink, writingDirection: "rtl" }, subtitle: { color: buzzColors.muted, marginTop: 3, writingDirection: "rtl" }, loader: { marginVertical: 25 }, cards: { flexDirection: "row-reverse", gap: 8, marginBottom: 25 }, stat: { flex: 1, alignItems: "center", backgroundColor: "#FFFFFF", borderRadius: 16, paddingVertical: 14, borderWidth: 1, borderColor: "#ECECF3" }, statValue: { color: buzzColors.ink, fontSize: 21, fontWeight: "900", marginTop: 6 }, statLabel: { color: buzzColors.muted, fontSize: 11, marginTop: 2, writingDirection: "rtl" }, section: { textAlign: "right", color: buzzColors.ink, fontSize: 17, fontWeight: "900", marginBottom: 10, writingDirection: "rtl" }, userRow: { flexDirection: "row-reverse", alignItems: "center", gap: 10, backgroundColor: "#FFFFFF", borderRadius: 16, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: "#ECECF3" }, avatar: { width: 40, height: 40, borderRadius: 14, backgroundColor: "#E9E7FF", alignItems: "center", justifyContent: "center" }, avatarText: { color: buzzColors.indigo, fontSize: 18, fontWeight: "900" }, userCopy: { flex: 1, alignItems: "flex-end" }, userName: { color: buzzColors.ink, fontWeight: "800", writingDirection: "rtl" }, userHandle: { color: buzzColors.muted, fontSize: 11, marginTop: 2, writingDirection: "rtl" }, error: { color: buzzColors.coral, textAlign: "right", marginBottom: 15, writingDirection: "rtl" }, empty: { color: buzzColors.muted, textAlign: "center", marginTop: 20, writingDirection: "rtl" }, denied: { color: buzzColors.ink, textAlign: "center", marginBottom: 15, writingDirection: "rtl" }, button: { backgroundColor: buzzColors.indigo, borderRadius: 14, paddingHorizontal: 22, paddingVertical: 12 }, buttonText: { color: "#FFFFFF", fontWeight: "800" } });
+function AdminRow({ item, currentUserId, onTransfer, onDeleteUser, onRoomAction }: { item: AdminItem; currentUserId: number; onTransfer: (user: { id: number; name: string }) => void; onDeleteUser: (user: { id: number; name: string | null }) => void; onRoomAction: (room: { id: string; title: string }, action: "close" | "delete") => void }) {
+  if (item.type === "user") { const user = item.data; return <View style={styles.row}><Avatar initials={user.name?.slice(0, 1) || "؟"} tint={user.role === "admin" ? "#D79815" : buzzColors.indigo} size={47} /><View style={styles.rowCopy}><Text style={styles.rowTitle}>{user.name || "حساب"}</Text><Text style={styles.rowSub}>@{user.username || "—"} · {user.role === "admin" ? "مدير" : "مستخدم"} · {user.points} نقطة</Text></View><Pressable onPress={() => onTransfer({ id: user.id, name: user.name || "حساب" })} style={styles.minor}><MaterialIcons name="swap-horiz" color={buzzColors.indigo} size={20} /></Pressable>{user.id !== currentUserId ? <Pressable onPress={() => onDeleteUser(user)} style={styles.minorDanger}><MaterialIcons name="delete-outline" color="#C94458" size={20} /></Pressable> : null}</View>; }
+  const room = item.data; return <View style={styles.row}><View style={styles.roomMark}><MaterialIcons name={room.isLive ? "podcasts" : "lock-outline"} color={room.isLive ? buzzColors.green : "#8A8A98"} size={23} /></View><View style={styles.rowCopy}><Text style={styles.rowTitle}>{room.title}</Text><Text style={styles.rowSub}>{room.isLive ? "غرفة نشطة" : "غرفة مغلقة"}</Text></View>{room.isLive ? <Pressable onPress={() => onRoomAction(room, "close")} style={styles.minor}><MaterialIcons name="lock" color="#A36D13" size={19} /></Pressable> : null}<Pressable onPress={() => onRoomAction(room, "delete")} style={styles.minorDanger}><MaterialIcons name="delete-outline" color="#C94458" size={20} /></Pressable></View>;
+}
+
+const styles = StyleSheet.create({ content: { padding: 17, paddingBottom: 36 }, header: { flexDirection: "row-reverse", alignItems: "center", gap: 12 }, iconButton: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#ECECF3", alignItems: "center", justifyContent: "center" }, headerCopy: { flex: 1, alignItems: "flex-end" }, title: { color: buzzColors.ink, fontSize: 24, fontWeight: "900", writingDirection: "rtl" }, subtitle: { color: buzzColors.muted, fontSize: 11, marginTop: 2, writingDirection: "rtl" }, summary: { flexDirection: "row-reverse", gap: 8, marginTop: 18 }, summaryItem: { flex: 1, alignItems: "center", backgroundColor: "#FFFFFF", borderRadius: 17, paddingVertical: 13, borderWidth: 1, borderColor: "#ECECF3" }, summaryValue: { color: buzzColors.ink, fontSize: 19, fontWeight: "900", marginTop: 5 }, summaryLabel: { color: buzzColors.muted, fontSize: 10, marginTop: 2, writingDirection: "rtl" }, create: { height: 49, borderRadius: 16, backgroundColor: buzzColors.indigo, marginTop: 13, flexDirection: "row-reverse", gap: 8, alignItems: "center", justifyContent: "center" }, createText: { color: "#FFFFFF", fontSize: 14, fontWeight: "900", writingDirection: "rtl" }, sectionTitle: { color: buzzColors.ink, fontSize: 17, fontWeight: "900", textAlign: "right", writingDirection: "rtl", marginTop: 21, marginBottom: 9 }, row: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#ECECF3", borderRadius: 18, padding: 11, flexDirection: "row-reverse", alignItems: "center", gap: 9, marginBottom: 8 }, rowCopy: { flex: 1, alignItems: "flex-end" }, rowTitle: { color: buzzColors.ink, fontSize: 14, fontWeight: "900", writingDirection: "rtl" }, rowSub: { color: buzzColors.muted, fontSize: 10, marginTop: 3, textAlign: "right", writingDirection: "rtl" }, roomMark: { width: 47, height: 47, borderRadius: 15, backgroundColor: "#F5F5FA", alignItems: "center", justifyContent: "center" }, minor: { width: 36, height: 36, borderRadius: 12, backgroundColor: "#EFEEFF", alignItems: "center", justifyContent: "center" }, minorDanger: { width: 36, height: 36, borderRadius: 12, backgroundColor: "#FFF0F2", alignItems: "center", justifyContent: "center" }, shade: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15,15,30,0.48)" }, sheet: { backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 21, paddingBottom: 32 }, sheetTitle: { color: buzzColors.ink, fontSize: 21, fontWeight: "900", textAlign: "right", writingDirection: "rtl" }, sheetCopy: { color: buzzColors.muted, fontSize: 12, textAlign: "right", marginTop: 5, writingDirection: "rtl" }, input: { height: 51, marginTop: 12, borderRadius: 15, backgroundColor: "#F6F6FA", paddingHorizontal: 13, color: buzzColors.ink, fontSize: 14, writingDirection: "rtl" }, primary: { height: 51, borderRadius: 15, backgroundColor: buzzColors.indigo, marginTop: 14, alignItems: "center", justifyContent: "center" }, primaryText: { color: "#FFFFFF", fontSize: 14, fontWeight: "900", writingDirection: "rtl" }, cancel: { height: 44, alignItems: "center", justifyContent: "center", marginTop: 4 }, cancelText: { color: buzzColors.indigo, fontSize: 14, fontWeight: "800", writingDirection: "rtl" }, denied: { color: buzzColors.ink, fontSize: 17, fontWeight: "900", textAlign: "center", marginTop: 12, writingDirection: "rtl" }, disabled: { opacity: 0.5 }, pressed: { opacity: 0.72, transform: [{ scale: 0.98 }] } });

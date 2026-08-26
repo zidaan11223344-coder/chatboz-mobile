@@ -4,11 +4,11 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "
 
 import { Avatar, buzzColors } from "@/components/buzz-ui";
 import { ScreenContainer } from "@/components/screen-container";
-import { useAuth } from "@/hooks/use-auth";
+import { useLocalAuth } from "@/hooks/use-local-auth";
 import { trpc } from "@/lib/trpc";
 
 export default function MessagesScreen() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated } = useLocalAuth();
   const conversations = trpc.social.conversations.list.useQuery(undefined, { enabled: isAuthenticated });
   return <ScreenContainer edges={["top", "left", "right"]}><FlatList data={conversations.data ?? []} keyExtractor={(item) => item.id} contentContainerStyle={styles.list} renderItem={({ item }) => item.user ? <Pressable onPress={() => router.push(`/chat/${item.id}`)} style={({ pressed }) => [styles.row, pressed && styles.pressed]}><Avatar initials={item.user.name.slice(0, 1) || "؟"} tint={buzzColors.indigo} size={54} /><View style={styles.copy}><Text style={styles.name}>{item.user.name}</Text><Text numberOfLines={1} style={styles.last}>{item.lastMessage?.body || "ابدأ محادثة خاصة"}</Text></View><MaterialIcons name="chevron-left" color="#A4A4B4" size={23} /></Pressable> : null} ListHeaderComponent={<View style={styles.header}><Pressable onPress={() => router.push("/add-friend")} style={styles.add}><MaterialIcons name="person-add-alt-1" size={21} color="#FFFFFF" /></Pressable><Text style={styles.heading}>الدردشات</Text></View>} ListEmptyComponent={conversations.isLoading ? <ActivityIndicator color={buzzColors.indigo} style={{ marginTop: 60 }} /> : <View style={styles.empty}><View style={styles.emptyIcon}><MaterialIcons name="chat-bubble-outline" size={34} color={buzzColors.indigo} /></View><Text style={styles.emptyTitle}>لا توجد محادثات بعد</Text><Text style={styles.emptyCopy}>ابدأ من قائمة الأصدقاء، وستظهر هنا المحادثات الحقيقية فقط.</Text><Pressable onPress={() => router.push("/(tabs)/friends")} style={({ pressed }) => [styles.primary, pressed && styles.pressed]}><Text style={styles.primaryText}>فتح الأصدقاء</Text></Pressable></View>} /></ScreenContainer>;
 }

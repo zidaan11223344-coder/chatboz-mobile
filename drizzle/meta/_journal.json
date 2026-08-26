@@ -15,6 +15,13 @@
       "when": 1787780232164,
       "tag": "0001_deep_shatterstar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787786122215,
+      "tag": "0002_fearless_mercury",
+      "breakpoints": true
     }
   ]
 }

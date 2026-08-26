@@ -4,12 +4,11 @@ import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View }
 
 import { Avatar, buzzColors } from "@/components/buzz-ui";
 import { ScreenContainer } from "@/components/screen-container";
-import { startOAuthLogin } from "@/constants/oauth";
-import { useAuth } from "@/hooks/use-auth";
+import { useLocalAuth } from "@/hooks/use-local-auth";
 import { trpc } from "@/lib/trpc";
 
 export default function FriendsScreen() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading } = useLocalAuth();
   const friendsQuery = trpc.social.friends.list.useQuery(undefined, { enabled: isAuthenticated });
   const createConversation = trpc.social.conversations.create.useMutation();
 
@@ -23,7 +22,7 @@ export default function FriendsScreen() {
   };
 
   if (loading) return <ScreenContainer className="items-center justify-center"><ActivityIndicator color={buzzColors.indigo} /></ScreenContainer>;
-  if (!isAuthenticated) return <ScreenContainer className="px-6 items-center justify-center"><Text style={styles.emptyTitle}>سجّل الدخول أولًا</Text><Text style={styles.emptyCopy}>أضف أصدقاء حقيقيين وتواصل معهم بعد الدخول إلى حسابك.</Text><Pressable onPress={() => void startOAuthLogin()} style={({ pressed }) => [styles.primary, pressed && styles.pressed]}><Text style={styles.primaryText}>تسجيل الدخول</Text></Pressable></ScreenContainer>;
+  if (!isAuthenticated) return <ScreenContainer className="px-6 items-center justify-center"><Text style={styles.emptyTitle}>سجّل الدخول أولًا</Text><Text style={styles.emptyCopy}>أضف أصدقاء حقيقيين وتواصل معهم بعد الدخول إلى حسابك.</Text><Pressable onPress={() => router.push("/login")} style={({ pressed }) => [styles.primary, pressed && styles.pressed]}><Text style={styles.primaryText}>تسجيل الدخول</Text></Pressable></ScreenContainer>;
 
   return <ScreenContainer edges={["top", "left", "right"]}><FlatList data={friendsQuery.data ?? []} keyExtractor={(item) => String(item.id)} contentContainerStyle={styles.list} renderItem={({ item }) => <Pressable onPress={() => void openConversation(item.id)} style={({ pressed }) => [styles.row, pressed && styles.pressed]}><Avatar initials={item.name.slice(0, 1) || "؟"} tint={buzzColors.indigo} size={55} /><View style={styles.copy}><Text style={styles.name}>{item.name}</Text><Text style={styles.caption}>صديق في شات باز</Text></View><MaterialIcons name="chat-bubble-outline" color={buzzColors.indigo} size={22} /></Pressable>} ListHeaderComponent={<View style={styles.header}><Pressable onPress={() => router.push("/add-friend")} style={({ pressed }) => [styles.add, pressed && styles.pressed]}><MaterialIcons name="person-add-alt-1" size={21} color="#FFFFFF" /><Text style={styles.addText}>إضافة صديق</Text></Pressable><Text style={styles.heading}>الأصدقاء</Text></View>} ListEmptyComponent={friendsQuery.isLoading ? <ActivityIndicator style={{ marginTop: 55 }} color={buzzColors.indigo} /> : <View style={styles.empty}><View style={styles.emptyIcon}><MaterialIcons name="group-add" size={34} color={buzzColors.indigo} /></View><Text style={styles.emptyTitle}>لا يوجد أصدقاء بعد</Text><Text style={styles.emptyCopy}>ابحث عن حساب حقيقي باسمه ثم أرسل له طلب صداقة.</Text><Pressable onPress={() => router.push("/add-friend")} style={({ pressed }) => [styles.primary, pressed && styles.pressed]}><Text style={styles.primaryText}>إضافة صديق</Text></Pressable></View>} /></ScreenContainer>;
 }

@@ -5,11 +5,11 @@ import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextIn
 
 import { Avatar, buzzColors } from "@/components/buzz-ui";
 import { ScreenContainer } from "@/components/screen-container";
-import { useAuth } from "@/hooks/use-auth";
+import { useLocalAuth } from "@/hooks/use-local-auth";
 import { trpc } from "@/lib/trpc";
 
 export default function AddFriendScreen() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated } = useLocalAuth();
   const [query, setQuery] = useState("");
   const search = trpc.social.friends.search.useQuery({ query: query.trim() }, { enabled: isAuthenticated && query.trim().length >= 2 });
   const request = trpc.social.friends.request.useMutation();

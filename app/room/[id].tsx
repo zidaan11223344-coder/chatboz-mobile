@@ -4,12 +4,12 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View
 
 import { Avatar, buzzColors, buzzHaptic } from "@/components/buzz-ui";
 import { ScreenContainer } from "@/components/screen-container";
-import { useAuth } from "@/hooks/use-auth";
+import { useLocalAuth } from "@/hooks/use-local-auth";
 import { trpc } from "@/lib/trpc";
 
 export default function VoiceRoomScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated } = useLocalAuth();
   const roomsQuery = trpc.social.rooms.list.useQuery(undefined, { enabled: isAuthenticated });
   const joinRoom = trpc.social.rooms.join.useMutation();
   const room = roomsQuery.data?.find((item) => item.id === id);

@@ -3,10 +3,14 @@ import { boolean, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varc
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
+  username: varchar("username", { length: 32 }).unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
+  passwordHash: varchar("passwordHash", { length: 255 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  accountStatus: mysqlEnum("accountStatus", ["active", "disabled"]).default("active").notNull(),
+  points: int("points").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -19,6 +23,16 @@ export const rooms = mysqlTable("rooms", {
   description: text("description"),
   category: varchar("category", { length: 40 }).notNull(),
   isLive: boolean("isLive").default(true).notNull(),
+  closedAt: timestamp("closedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const pointTransfers = mysqlTable("pointTransfers", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  adminId: int("adminId").notNull(),
+  recipientId: int("recipientId").notNull(),
+  amount: int("amount").notNull(),
+  note: varchar("note", { length: 180 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -65,3 +79,4 @@ export type Room = typeof rooms.$inferSelect;
 export type FriendRequest = typeof friendRequests.$inferSelect;
 export type DirectConversation = typeof directConversations.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+export type PointTransfer = typeof pointTransfers.$inferSelect;

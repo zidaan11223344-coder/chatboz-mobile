@@ -1,11 +1,12 @@
 import { z } from "zod";
 
 import * as db from "./db";
+import { createLocalSession, ensureBootstrapAdmin, getBootstrapAdminConfig, hashPassword, normalizeUsername, validateUsername, verifyPassword } from "./local-auth";
 import { storagePut } from "./storage";
 import { COOKIE_NAME } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 
 const roomInput = z.object({
   title: z.string().trim().min(3, "اكتب عنوانًا من 3 أحرف على الأقل.").max(90),
@@ -29,7 +30,25 @@ const attachmentInput = z.object({
   mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "audio/m4a", "audio/mpeg", "audio/ogg", "audio/webm", "audio/wav"]),
 });
 
+const usernameInput = z.string().trim().min(3, "اسم المستخدم قصير.").max(32, "اسم المستخدم طويل.").transform(normalizeUsername).refine(validateUsername, "استخدم حروفًا عربية أو لاتينية أو أرقامًا أو شرطة سفلية فقط.");
+const displayNameInput = z.string().trim().min(2, "اكتب اسمًا ظاهرًا من حرفين على الأقل.").max(50, "الاسم الظاهر طويل.").refine((value) => /^[\p{L}\p{N}\s_.-]+$/u.test(value), "الاسم الظاهر يحتوي رموزًا غير مسموحة.");
+const passwordInput = z.string().min(8, "كلمة المرور يجب أن تكون 8 أحرف على الأقل.").max(128, "كلمة المرور طويلة جدًا.");
+const localAccountInput = z.object({ username: usernameInput, name: displayNameInput, password: passwordInput });
+
 export const appRouter = router({
+  localAuth: router({
+    bootstrapReady: publicProcedure.query(() => getBootstrapAdminConfig()),
+    register: publicProcedure.input(localAccountInput).mutation(async ({ input }) => {
+      const user = await db.createLocalUser({ username: input.username, name: input.name, passwordHash: await hashPassword(input.password) });
+      return { token: await createLocalSession(user), user: { id: user.id, username: user.username, name: user.name, role: user.role, points: user.points } };
+    }),
+    login: publicProcedure.input(z.object({ username: usernameInput, password: passwordInput })).mutation(async ({ input }) => {
+      await ensureBootstrapAdmin();
+      const user = await db.getLocalUserByUsername(input.username);
+      if (!user || user.accountStatus !== "active" || !(await verifyPassword(input.password, user.passwordHash))) throw new Error("اسم المستخدم أو كلمة المرور غير صحيحين.");
+      return { token: await createLocalSession(user), user: { id: user.id, username: user.username, name: user.name, role: user.role, points: user.points } };
+    }),
+  }),
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
@@ -68,6 +87,31 @@ export const appRouter = router({
         const { url } = await storagePut(`chat/${ctx.user.id}/${crypto.randomUUID()}.${extension}`, bytes, input.mimeType);
         return { url, name: input.name, mimeType: input.mimeType };
       }),
+    }),
+  }),
+  admin: router({
+    users: adminProcedure.query(() => db.listAdminUsers()),
+    createUser: adminProcedure.input(localAccountInput).mutation(async ({ input }) => {
+      const user = await db.createLocalUser({ username: input.username, name: input.name, passwordHash: await hashPassword(input.password) });
+      return { id: user.id, username: user.username, name: user.name };
+    }),
+    deleteUser: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      if (ctx.user.id === input.userId) throw new Error("لا يمكنك حذف حساب المدير الذي سجلت الدخول به.");
+      await db.deleteLocalUser(input.userId);
+      return { success: true } as const;
+    }),
+    rooms: adminProcedure.query(() => db.listAdminRooms()),
+    closeRoom: adminProcedure.input(z.object({ roomId: z.string().uuid() })).mutation(async ({ input }) => {
+      await db.closeRoom(input.roomId);
+      return { success: true } as const;
+    }),
+    deleteRoom: adminProcedure.input(z.object({ roomId: z.string().uuid() })).mutation(async ({ input }) => {
+      await db.removeRoom(input.roomId);
+      return { success: true } as const;
+    }),
+    transferPoints: adminProcedure.input(z.object({ recipientId: z.number().int().positive(), amount: z.number().int().positive().max(1_000_000), note: z.string().trim().max(180).optional() })).mutation(async ({ ctx, input }) => {
+      await db.transferPoints({ adminId: ctx.user.id, ...input });
+      return { success: true } as const;
     }),
   }),
 });

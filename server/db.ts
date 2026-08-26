@@ -1,4 +1,4 @@
-import { and, desc, eq, like, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 
 import {
@@ -6,6 +6,7 @@ import {
   directConversations,
   friendRequests,
   type InsertUser,
+  pointTransfers,
   roomMembers,
   rooms,
   users,
@@ -72,6 +73,43 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
+export async function getLocalUserByUsername(username: string) {
+  const db = await requireDb();
+  const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
+  return user;
+}
+
+export async function getActiveUserById(id: number) {
+  const db = await requireDb();
+  const [user] = await db.select().from(users).where(and(eq(users.id, id), eq(users.accountStatus, "active"))).limit(1);
+  return user;
+}
+
+export async function createLocalUser(input: { username: string; name: string; passwordHash: string; role?: "user" | "admin" }) {
+  const db = await requireDb();
+  const existing = await getLocalUserByUsername(input.username);
+  if (existing) throw new Error("اسم المستخدم مستخدم بالفعل.");
+  await db.insert(users).values({
+    openId: `local:${crypto.randomUUID()}`,
+    username: input.username,
+    name: input.name,
+    passwordHash: input.passwordHash,
+    loginMethod: "local",
+    role: input.role ?? "user",
+    accountStatus: "active",
+    points: 0,
+  });
+  const created = await getLocalUserByUsername(input.username);
+  if (!created) throw new Error("تعذر إنشاء الحساب.");
+  return created;
+}
+
+export async function ensureBootstrapAdmin(input: { username: string; name: string; passwordHash: string }) {
+  const existing = await getLocalUserByUsername(input.username);
+  if (existing) return existing;
+  return createLocalUser({ ...input, role: "admin" });
+}
+
 export type RoomSummary = {
   id: string;
   title: string;
@@ -90,6 +128,7 @@ export async function listRoomsForUser(userId: number): Promise<RoomSummary[]> {
     .select({ room: rooms, owner: users })
     .from(rooms)
     .innerJoin(users, eq(rooms.ownerId, users.id))
+    .where(and(eq(rooms.isLive, true), eq(users.accountStatus, "active")))
     .orderBy(desc(rooms.createdAt));
 
   return Promise.all(rows.map(async ({ room, owner }) => {
@@ -146,7 +185,7 @@ export async function searchRealUsers(query: string, currentUserId: number) {
   return db
     .select({ id: users.id, name: users.name, email: users.email })
     .from(users)
-    .where(and(like(users.name, `%${normalized}%`), ne(users.id, currentUserId)))
+    .where(and(like(users.name, `%${normalized}%`), ne(users.id, currentUserId), eq(users.accountStatus, "active")))
     .limit(20);
 }
 
@@ -312,4 +351,75 @@ export async function createMessage(input: {
   };
   await db.insert(chatMessages).values(message);
   return { ...message, createdAt: new Date() };
+}
+
+export async function listAdminUsers() {
+  const db = await requireDb();
+  return db
+    .select({ id: users.id, username: users.username, name: users.name, role: users.role, accountStatus: users.accountStatus, points: users.points, createdAt: users.createdAt })
+    .from(users)
+    .orderBy(desc(users.createdAt));
+}
+
+export async function listAdminRooms() {
+  const db = await requireDb();
+  return db
+    .select({ id: rooms.id, title: rooms.title, isLive: rooms.isLive, ownerId: rooms.ownerId, createdAt: rooms.createdAt, closedAt: rooms.closedAt })
+    .from(rooms)
+    .orderBy(desc(rooms.createdAt));
+}
+
+export async function closeRoom(roomId: string) {
+  const db = await requireDb();
+  const [room] = await db.select({ id: rooms.id }).from(rooms).where(eq(rooms.id, roomId)).limit(1);
+  if (!room) throw new Error("الغرفة غير موجودة.");
+  await db.update(rooms).set({ isLive: false, closedAt: new Date() }).where(eq(rooms.id, roomId));
+}
+
+export async function removeRoom(roomId: string) {
+  const db = await requireDb();
+  await db.transaction(async (tx) => {
+    await tx.delete(chatMessages).where(eq(chatMessages.roomId, roomId));
+    await tx.delete(roomMembers).where(eq(roomMembers.roomId, roomId));
+    await tx.delete(rooms).where(eq(rooms.id, roomId));
+  });
+}
+
+export async function transferPoints(input: { adminId: number; recipientId: number; amount: number; note?: string }) {
+  if (input.amount <= 0) throw new Error("اكتب عدد نقاط موجبًا.");
+  const db = await requireDb();
+  await db.transaction(async (tx) => {
+    const [admin] = await tx.select().from(users).where(and(eq(users.id, input.adminId), eq(users.role, "admin"), eq(users.accountStatus, "active"))).limit(1);
+    const [recipient] = await tx.select().from(users).where(and(eq(users.id, input.recipientId), eq(users.accountStatus, "active"))).limit(1);
+    if (!admin || !recipient) throw new Error("الحساب المطلوب غير متاح.");
+    if (admin.points < input.amount) throw new Error("رصيد المدير غير كافٍ للتحويل.");
+    await tx.update(users).set({ points: admin.points - input.amount }).where(eq(users.id, input.adminId));
+    await tx.update(users).set({ points: recipient.points + input.amount }).where(eq(users.id, input.recipientId));
+    await tx.insert(pointTransfers).values({ id: crypto.randomUUID(), adminId: input.adminId, recipientId: input.recipientId, amount: input.amount, note: input.note?.trim() || null });
+  });
+}
+
+export async function deleteLocalUser(userId: number) {
+  const db = await requireDb();
+  const ownedRooms = await db.select({ id: rooms.id }).from(rooms).where(eq(rooms.ownerId, userId));
+  const roomIds = ownedRooms.map((room) => room.id);
+  const conversations = await db.select({ id: directConversations.id }).from(directConversations).where(or(eq(directConversations.firstUserId, userId), eq(directConversations.secondUserId, userId)));
+  const conversationIds = conversations.map((conversation) => conversation.id);
+
+  await db.transaction(async (tx) => {
+    if (roomIds.length) {
+      await tx.delete(chatMessages).where(inArray(chatMessages.roomId, roomIds));
+      await tx.delete(roomMembers).where(inArray(roomMembers.roomId, roomIds));
+      await tx.delete(rooms).where(inArray(rooms.id, roomIds));
+    }
+    if (conversationIds.length) {
+      await tx.delete(chatMessages).where(inArray(chatMessages.conversationId, conversationIds));
+      await tx.delete(directConversations).where(inArray(directConversations.id, conversationIds));
+    }
+    await tx.delete(chatMessages).where(eq(chatMessages.senderId, userId));
+    await tx.delete(roomMembers).where(eq(roomMembers.userId, userId));
+    await tx.delete(friendRequests).where(or(eq(friendRequests.requesterId, userId), eq(friendRequests.addresseeId, userId)));
+    await tx.delete(pointTransfers).where(or(eq(pointTransfers.adminId, userId), eq(pointTransfers.recipientId, userId)));
+    await tx.delete(users).where(eq(users.id, userId));
+  });
 }

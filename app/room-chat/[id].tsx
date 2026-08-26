@@ -6,12 +6,12 @@ import { ChatComposer } from "@/components/chat-composer";
 import { ChatMessageBubble } from "@/components/chat-message-bubble";
 import { ScreenContainer } from "@/components/screen-container";
 import { buzzColors } from "@/components/buzz-ui";
-import { useAuth } from "@/hooks/use-auth";
+import { useLocalAuth } from "@/hooks/use-local-auth";
 import { trpc } from "@/lib/trpc";
 
 export default function RoomChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useLocalAuth();
   const messages = trpc.social.rooms.messages.useQuery({ roomId: id ?? "" }, { enabled: isAuthenticated && Boolean(id) });
   if (!id) return null;
   return <ScreenContainer edges={["top", "left", "right", "bottom"]}><View style={styles.page}><View style={styles.header}><Pressable onPress={() => router.back()} style={styles.back}><MaterialIcons name="arrow-forward" size={23} color={buzzColors.ink} /></Pressable><View style={styles.titleWrap}><Text style={styles.title}>دردشة الغرفة</Text><Text style={styles.subtitle}>أعضاء حقيقيون فقط</Text></View><View style={{ width: 42 }} /></View><FlatList data={messages.data ?? []} keyExtractor={(item) => item.id} contentContainerStyle={styles.list} renderItem={({ item }) => <ChatMessageBubble message={item} mine={item.senderId === user?.id} />} ListEmptyComponent={messages.isLoading ? <ActivityIndicator color={buzzColors.indigo} style={{ marginTop: 60 }} /> : <View style={styles.empty}><MaterialIcons name="chat-bubble-outline" color={buzzColors.indigo} size={36} /><Text style={styles.emptyTitle}>لا توجد رسائل بعد</Text><Text style={styles.emptyCopy}>كن أول عضو يكتب في هذه الغرفة.</Text></View>} /><ChatComposer destination={{ roomId: id }} onSent={() => messages.refetch()} /></View></ScreenContainer>;

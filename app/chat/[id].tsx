@@ -6,12 +6,12 @@ import { Avatar, buzzColors } from "@/components/buzz-ui";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatMessageBubble } from "@/components/chat-message-bubble";
 import { ScreenContainer } from "@/components/screen-container";
-import { useAuth } from "@/hooks/use-auth";
+import { useLocalAuth } from "@/hooks/use-local-auth";
 import { trpc } from "@/lib/trpc";
 
 export default function ConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useLocalAuth();
   const conversations = trpc.social.conversations.list.useQuery(undefined, { enabled: isAuthenticated });
   const messages = trpc.social.conversations.messages.useQuery({ conversationId: id ?? "" }, { enabled: isAuthenticated && Boolean(id) });
   const conversation = conversations.data?.find((item) => item.id === id);
