@@ -27,6 +27,16 @@ const requireUser = t.middleware(async (opts) => {
 
 export const protectedProcedure = t.procedure.use(requireUser);
 
+export const staffProcedure = t.procedure.use(
+  t.middleware(async (opts) => {
+    const { ctx, next } = opts;
+    if (!ctx.user || (ctx.user.role !== "admin" && ctx.user.role !== "agent")) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "هذه العملية متاحة للمدير والوكلاء المصرح لهم فقط." });
+    }
+    return next({ ctx: { ...ctx, user: ctx.user } });
+  }),
+);
+
 export const adminProcedure = t.procedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;

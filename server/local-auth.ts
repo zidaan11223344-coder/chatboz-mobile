@@ -53,7 +53,7 @@ export async function ensureBootstrapAdmin() {
   return db.ensureBootstrapAdmin({ username: config.username, name: config.username, passwordHash: await hashPassword(config.password) });
 }
 
-export async function createLocalSession(user: { id: number; role: "user" | "admin" }) {
+export async function createLocalSession(user: { id: number; role: "user" | "admin" | "agent" }) {
   return new SignJWT({ role: user.role, kind: "local" })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(String(user.id))

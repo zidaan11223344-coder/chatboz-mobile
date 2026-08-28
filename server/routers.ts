@@ -6,7 +6,7 @@ import { storagePut } from "./storage";
 import { COOKIE_NAME } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router, staffProcedure } from "./_core/trpc";
 
 const roomInput = z.object({
   title: z.string().trim().min(3, "اكتب عنوانًا من 3 أحرف على الأقل.").max(90),
@@ -17,6 +17,7 @@ const roomInput = z.object({
 const messageInput = z.object({
   kind: z.enum(["text", "image", "audio"]),
   body: z.string().trim().max(4000).optional(),
+  textColor: z.string().regex(/^#[0-9a-fA-F]{6,8}$/, "لون الرسالة غير صالح.").optional(),
   attachmentUrl: z.string().max(2000).optional(),
   attachmentName: z.string().trim().max(255).optional(),
   durationSeconds: z.number().int().min(0).max(3600).optional(),
@@ -38,9 +39,8 @@ const localAccountInput = z.object({ username: usernameInput, name: displayNameI
 export const appRouter = router({
   localAuth: router({
     bootstrapReady: publicProcedure.query(() => getBootstrapAdminConfig()),
-    register: publicProcedure.input(localAccountInput).mutation(async ({ input }) => {
-      const user = await db.createLocalUser({ username: input.username, name: input.name, passwordHash: await hashPassword(input.password) });
-      return { token: await createLocalSession(user), user: { id: user.id, username: user.username, name: user.name, role: user.role, points: user.points } };
+    register: publicProcedure.input(localAccountInput).mutation(() => {
+      throw new Error("إنشاء الحسابات متاح للمدير والوكلاء المصرح لهم فقط.");
     }),
     login: publicProcedure.input(z.object({ username: usernameInput, password: passwordInput })).mutation(async ({ input }) => {
       await ensureBootstrapAdmin();
@@ -68,6 +68,7 @@ export const appRouter = router({
     friends: router({
       search: protectedProcedure.input(z.object({ query: z.string().trim().max(90) })).query(({ ctx, input }) => db.searchRealUsers(input.query, ctx.user.id)),
       list: protectedProcedure.query(({ ctx }) => db.listFriendsForUser(ctx.user.id)),
+      incoming: protectedProcedure.query(({ ctx }) => db.listIncomingFriendRequests(ctx.user.id)),
       request: protectedProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(({ ctx, input }) => db.requestFriendship(ctx.user.id, input.userId)),
       respond: protectedProcedure.input(z.object({ requestId: z.string().uuid(), accept: z.boolean() })).mutation(({ ctx, input }) => db.respondToFriendRequest(input.requestId, ctx.user.id, input.accept)),
     }),
@@ -78,6 +79,16 @@ export const appRouter = router({
     }),
     messages: router({
       send: protectedProcedure.input(messageInput).mutation(({ ctx, input }) => db.createMessage({ senderId: ctx.user.id, ...input })),
+    }),
+    notifications: router({
+      list: protectedProcedure.query(({ ctx }) => db.listNotifications(ctx.user.id)),
+      unreadCount: protectedProcedure.query(({ ctx }) => db.countUnreadNotifications(ctx.user.id)),
+      markRead: protectedProcedure.input(z.object({ notificationId: z.string().uuid() })).mutation(({ ctx, input }) => db.markNotificationRead(input.notificationId, ctx.user.id)),
+    }),
+    store: router({
+      products: protectedProcedure.query(() => db.listStoreProducts()),
+      owned: protectedProcedure.query(({ ctx }) => db.listOwnedProducts(ctx.user.id)),
+      purchase: protectedProcedure.input(z.object({ productId: z.string().uuid() })).mutation(({ ctx, input }) => db.purchaseStoreProduct(ctx.user.id, input.productId)),
     }),
     media: router({
       upload: protectedProcedure.input(attachmentInput).mutation(async ({ ctx, input }) => {
@@ -91,9 +102,14 @@ export const appRouter = router({
   }),
   admin: router({
     users: adminProcedure.query(() => db.listAdminUsers()),
-    createUser: adminProcedure.input(localAccountInput).mutation(async ({ input }) => {
-      const user = await db.createLocalUser({ username: input.username, name: input.name, passwordHash: await hashPassword(input.password) });
+    createUser: staffProcedure.input(localAccountInput).mutation(async ({ ctx, input }) => {
+      const user = await db.createLocalUser({ username: input.username, name: input.name, passwordHash: await hashPassword(input.password), createdById: ctx.user.id });
       return { id: user.id, username: user.username, name: user.name };
+    }),
+    setAgent: adminProcedure.input(z.object({ userId: z.number().int().positive(), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+      if (ctx.user.id === input.userId) throw new Error("لا يمكنك تغيير دور حساب المدير الحالي.");
+      await db.setUserRole(input.userId, input.enabled ? "agent" : "user");
+      return { success: true } as const;
     }),
     deleteUser: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       if (ctx.user.id === input.userId) throw new Error("لا يمكنك حذف حساب المدير الذي سجلت الدخول به.");

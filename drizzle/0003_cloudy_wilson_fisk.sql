@@ -1,0 +1,1 @@
+ALTER TABLE `chatMessages` ADD `textColor` varchar(9);

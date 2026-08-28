@@ -7,6 +7,7 @@ type LocalAuthContextValue = {
   loading: boolean;
   isAuthenticated: boolean;
   establish: (token: string, user: LocalSessionUser) => Promise<void>;
+  updateUser: (patch: Partial<LocalSessionUser>) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -27,6 +28,7 @@ export function LocalAuthProvider({ children }: { children: ReactNode }) {
     loading,
     isAuthenticated: Boolean(user),
     establish: async (token, nextUser) => { await saveLocalSession(token, nextUser); setUser(nextUser); },
+    updateUser: async (patch) => { if (!user) return; const token = await getLocalSessionToken(); if (!token) return; const nextUser = { ...user, ...patch }; await saveLocalSession(token, nextUser); setUser(nextUser); },
     logout: async () => { await clearLocalSession(); setUser(null); },
   }), [user, loading]);
 

@@ -1,10 +1,13 @@
-import { and, desc, eq, inArray, like, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, like, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 
 import {
   chatMessages,
   directConversations,
   friendRequests,
+  notifications,
+  storeProducts,
+  userProducts,
   type InsertUser,
   pointTransfers,
   roomMembers,
@@ -85,7 +88,7 @@ export async function getActiveUserById(id: number) {
   return user;
 }
 
-export async function createLocalUser(input: { username: string; name: string; passwordHash: string; role?: "user" | "admin" }) {
+export async function createLocalUser(input: { username: string; name: string; passwordHash: string; role?: "user" | "admin" | "agent"; createdById?: number }) {
   const db = await requireDb();
   const existing = await getLocalUserByUsername(input.username);
   if (existing) throw new Error("اسم المستخدم مستخدم بالفعل.");
@@ -96,6 +99,7 @@ export async function createLocalUser(input: { username: string; name: string; p
     passwordHash: input.passwordHash,
     loginMethod: "local",
     role: input.role ?? "user",
+    createdById: input.createdById ?? null,
     accountStatus: "active",
     points: 0,
   });
@@ -220,19 +224,45 @@ export async function requestFriendship(requesterId: number, addresseeId: number
   if (existing?.status === "accepted") throw new Error("هذا الحساب موجود ضمن أصدقائك بالفعل.");
   if (existing?.status === "pending") throw new Error("يوجد طلب صداقة قيد المراجعة بالفعل.");
 
-  await db.insert(friendRequests).values({
-    id: crypto.randomUUID(),
-    requesterId,
-    addresseeId,
-    status: "pending",
-  });
+  const requestId = existing?.id ?? crypto.randomUUID();
+  if (existing) {
+    await db.update(friendRequests).set({ requesterId, addresseeId, status: "pending", updatedAt: new Date() }).where(eq(friendRequests.id, existing.id));
+  } else {
+    await db.insert(friendRequests).values({ id: requestId, requesterId, addresseeId, status: "pending" });
+  }
+  const requester = await getActiveUserById(requesterId);
+  await db.insert(notifications).values({ id: crypto.randomUUID(), recipientId: addresseeId, actorId: requesterId, kind: "friend_request", title: "طلب صداقة جديد", body: `${requester?.name?.trim() || "مستخدم"} أرسل لك طلب صداقة.`, friendRequestId: requestId });
 }
 
 export async function respondToFriendRequest(requestId: string, userId: number, accept: boolean) {
   const db = await requireDb();
   const [request] = await db.select().from(friendRequests).where(eq(friendRequests.id, requestId)).limit(1);
   if (!request || request.addresseeId !== userId) throw new Error("طلب الصداقة غير متاح.");
-  await db.update(friendRequests).set({ status: accept ? "accepted" : "declined" }).where(eq(friendRequests.id, requestId));
+  await db.update(friendRequests).set({ status: accept ? "accepted" : "declined", updatedAt: new Date() }).where(eq(friendRequests.id, requestId));
+  const responder = await getActiveUserById(userId);
+  await db.insert(notifications).values({ id: crypto.randomUUID(), recipientId: request.requesterId, actorId: userId, kind: accept ? "friend_accepted" : "friend_request", title: accept ? "تم قبول طلب الصداقة" : "تم رفض طلب الصداقة", body: `${responder?.name?.trim() || "مستخدم"} ${accept ? "قبل طلب صداقتك." : "رفض طلب صداقتك."}`, friendRequestId: requestId });
+}
+
+export async function listIncomingFriendRequests(userId: number) {
+  const db = await requireDb();
+  const rows = await db.select({ request: friendRequests, requester: users }).from(friendRequests).innerJoin(users, eq(friendRequests.requesterId, users.id)).where(and(eq(friendRequests.addresseeId, userId), eq(friendRequests.status, "pending"), eq(users.accountStatus, "active"))).orderBy(desc(friendRequests.createdAt));
+  return rows.map(({ request, requester }) => ({ ...request, requester: { id: requester.id, name: requester.name?.trim() || "مستخدم", username: requester.username } }));
+}
+
+export async function listNotifications(userId: number) {
+  const db = await requireDb();
+  return db.select().from(notifications).where(eq(notifications.recipientId, userId)).orderBy(desc(notifications.createdAt)).limit(50);
+}
+
+export async function countUnreadNotifications(userId: number) {
+  const db = await requireDb();
+  const [row] = await db.select({ count: sql<number>`count(*)` }).from(notifications).where(and(eq(notifications.recipientId, userId), isNull(notifications.readAt)));
+  return Number(row?.count ?? 0);
+}
+
+export async function markNotificationRead(notificationId: string, userId: number) {
+  const db = await requireDb();
+  await db.update(notifications).set({ readAt: new Date() }).where(and(eq(notifications.id, notificationId), eq(notifications.recipientId, userId)));
 }
 
 async function assertFriendship(userId: number, otherUserId: number) {
@@ -325,6 +355,7 @@ export async function createMessage(input: {
   senderId: number;
   kind: "text" | "image" | "audio";
   body?: string;
+  textColor?: string;
   attachmentUrl?: string;
   attachmentName?: string;
   durationSeconds?: number;
@@ -343,6 +374,7 @@ export async function createMessage(input: {
     senderId: input.senderId,
     kind: input.kind,
     body: input.body?.trim() || null,
+    textColor: input.textColor?.trim() || null,
     attachmentUrl: input.attachmentUrl ?? null,
     attachmentName: input.attachmentName ?? null,
     durationSeconds: input.durationSeconds ?? null,
@@ -351,6 +383,48 @@ export async function createMessage(input: {
   };
   await db.insert(chatMessages).values(message);
   return { ...message, createdAt: new Date() };
+}
+
+const STORE_COLORS = ["#32CD32", "#8F86F5", "#F6B6C2", "#F6A800", "#F27B72", "#7C00FF", "#FF1717", "#E92BC6", "#F59E0B", "#00A8A8", "#9B59B6", "#3B82F6", "#F97316", "#22C55E", "#EAB308", "#2F80ED", "#16A085", "#B62E63", "#FF4A00", "#66CDAA", "#B24CCD", "#FF55AA"] as const;
+
+async function ensureStoreProducts() {
+  const db = await requireDb();
+  const [row] = await db.select({ count: sql<number>`count(*)` }).from(storeProducts);
+  if (Number(row?.count ?? 0) > 0) return;
+  await db.insert(storeProducts).values(STORE_COLORS.map((color, index) => ({ id: crypto.randomUUID(), code: `A-${index + 1}`, label: `Color A-${index + 1}`, colorHex: color, pointsCost: 5000, validityDays: 30, active: true })));
+}
+
+export async function listStoreProducts() {
+  const db = await requireDb();
+  await ensureStoreProducts();
+  return db.select().from(storeProducts).where(eq(storeProducts.active, true)).orderBy(storeProducts.pointsCost, storeProducts.code);
+}
+
+export async function listOwnedProducts(userId: number) {
+  const db = await requireDb();
+  return db.select({ product: storeProducts, ownership: userProducts }).from(userProducts).innerJoin(storeProducts, eq(userProducts.productId, storeProducts.id)).where(and(eq(userProducts.userId, userId), gt(userProducts.expiresAt, new Date()), eq(storeProducts.active, true))).orderBy(storeProducts.code);
+}
+
+export async function purchaseStoreProduct(userId: number, productId: string) {
+  const db = await requireDb();
+  return db.transaction(async (tx) => {
+    const [user] = await tx.select().from(users).where(and(eq(users.id, userId), eq(users.accountStatus, "active"))).limit(1);
+    const [product] = await tx.select().from(storeProducts).where(and(eq(storeProducts.id, productId), eq(storeProducts.active, true))).limit(1);
+    if (!user || !product) throw new Error("العنصر أو الحساب غير متاح.");
+    if (user.points < product.pointsCost) throw new Error("رصيد النقاط غير كافٍ.");
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + product.validityDays * 24 * 60 * 60 * 1000);
+    await tx.update(users).set({ points: user.points - product.pointsCost }).where(eq(users.id, userId));
+    await tx.insert(userProducts).values({ id: crypto.randomUUID(), userId, productId: product.id, expiresAt }).onDuplicateKeyUpdate({ set: { expiresAt } });
+    return { product, points: user.points - product.pointsCost, expiresAt };
+  });
+}
+
+export async function setUserRole(userId: number, role: "user" | "agent") {
+  const db = await requireDb();
+  const [target] = await db.select({ id: users.id, accountStatus: users.accountStatus }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!target || target.accountStatus !== "active") throw new Error("الحساب غير متاح.");
+  await db.update(users).set({ role }).where(eq(users.id, userId));
 }
 
 export async function listAdminUsers() {
