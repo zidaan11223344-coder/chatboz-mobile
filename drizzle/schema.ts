@@ -9,6 +9,7 @@ export const users = mysqlTable("users", {
   passwordHash: varchar("passwordHash", { length: 255 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin", "agent"]).default("user").notNull(),
+  agentPermissions: varchar("agentPermissions", { length: 512 }).default("{}").notNull(),
   createdById: int("createdById"),
   accountStatus: mysqlEnum("accountStatus", ["active", "disabled"]).default("active").notNull(),
   points: int("points").default(0).notNull(),

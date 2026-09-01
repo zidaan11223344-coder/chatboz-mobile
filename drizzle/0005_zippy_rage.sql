@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `agentPermissions` varchar(512) DEFAULT '{}' NOT NULL;

@@ -15,6 +15,7 @@ import {
   users,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { parseAgentPermissions, serializeAgentPermissions, type AgentPermissions } from "../shared/agent-permissions";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -430,9 +431,26 @@ export async function setUserRole(userId: number, role: "user" | "agent") {
 export async function listAdminUsers() {
   const db = await requireDb();
   return db
-    .select({ id: users.id, username: users.username, name: users.name, role: users.role, accountStatus: users.accountStatus, points: users.points, createdAt: users.createdAt })
+    .select({ id: users.id, username: users.username, name: users.name, role: users.role, accountStatus: users.accountStatus, points: users.points, agentPermissions: users.agentPermissions, createdAt: users.createdAt })
     .from(users)
     .orderBy(desc(users.createdAt));
+}
+
+export async function listAgentUsers() {
+  const db = await requireDb();
+  const rows = await db
+    .select({ id: users.id, username: users.username, name: users.name, role: users.role, accountStatus: users.accountStatus, agentPermissions: users.agentPermissions })
+    .from(users)
+    .where(and(eq(users.role, "agent"), eq(users.accountStatus, "active")))
+    .orderBy(desc(users.createdAt));
+  return rows.map((row) => ({ ...row, permissions: parseAgentPermissions(row.agentPermissions) }));
+}
+
+export async function setAgentPermissions(userId: number, permissions: AgentPermissions) {
+  const db = await requireDb();
+  const [target] = await db.select({ id: users.id, role: users.role, accountStatus: users.accountStatus }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!target || target.role !== "agent" || target.accountStatus !== "active") throw new Error("حساب الوكيل غير متاح.");
+  await db.update(users).set({ agentPermissions: serializeAgentPermissions(permissions) }).where(eq(users.id, userId));
 }
 
 export async function listAdminRooms() {

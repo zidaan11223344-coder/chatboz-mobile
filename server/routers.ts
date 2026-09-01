@@ -7,6 +7,9 @@ import { COOKIE_NAME } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router, staffProcedure } from "./_core/trpc";
+import { AGENT_PERMISSION_KEYS } from "../shared/agent-permissions";
+
+const agentPermissionsInput = z.object(Object.fromEntries(AGENT_PERMISSION_KEYS.map((key) => [key, z.boolean()])) as Record<(typeof AGENT_PERMISSION_KEYS)[number], z.ZodBoolean>);
 
 const roomInput = z.object({
   title: z.string().trim().min(3, "اكتب عنوانًا من 3 أحرف على الأقل.").max(90),
@@ -102,6 +105,11 @@ export const appRouter = router({
   }),
   admin: router({
     users: adminProcedure.query(() => db.listAdminUsers()),
+    agents: adminProcedure.query(() => db.listAgentUsers()),
+    setAgentPermissions: adminProcedure.input(z.object({ userId: z.number().int().positive(), permissions: agentPermissionsInput })).mutation(async ({ input }) => {
+      await db.setAgentPermissions(input.userId, input.permissions);
+      return { success: true } as const;
+    }),
     createUser: staffProcedure.input(localAccountInput).mutation(async ({ ctx, input }) => {
       const user = await db.createLocalUser({ username: input.username, name: input.name, passwordHash: await hashPassword(input.password), createdById: ctx.user.id });
       return { id: user.id, username: user.username, name: user.name };
