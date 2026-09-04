@@ -35,6 +35,7 @@ const attachmentInput = z.object({
 });
 
 const usernameInput = z.string().trim().min(3, "اسم المستخدم قصير.").max(32, "اسم المستخدم طويل.").transform(normalizeUsername).refine(validateUsername, "استخدم حروفًا عربية أو لاتينية أو أرقامًا أو شرطة سفلية فقط.");
+const englishUsernameInput = z.string().trim().min(3, "Username must be at least 3 characters.").max(32, "Username is too long.").transform(normalizeUsername).refine((value) => /^[a-z0-9_]+$/.test(value), "Username must contain English letters, numbers, or underscore only.");
 const displayNameInput = z.string().trim().min(2, "اكتب اسمًا ظاهرًا من حرفين على الأقل.").max(50, "الاسم الظاهر طويل.").refine((value) => /^[\p{L}\p{N}\s_.-]+$/u.test(value), "الاسم الظاهر يحتوي رموزًا غير مسموحة.");
 const passwordInput = z.string().min(8, "كلمة المرور يجب أن تكون 8 أحرف على الأقل.").max(128, "كلمة المرور طويلة جدًا.");
 const localAccountInput = z.object({ username: usernameInput, name: displayNameInput, password: passwordInput });
@@ -42,8 +43,9 @@ const localAccountInput = z.object({ username: usernameInput, name: displayNameI
 export const appRouter = router({
   localAuth: router({
     bootstrapReady: publicProcedure.query(() => getBootstrapAdminConfig()),
-    register: publicProcedure.input(localAccountInput).mutation(() => {
-      throw new Error("إنشاء الحسابات متاح للمدير والوكلاء المصرح لهم فقط.");
+    register: publicProcedure.input(z.object({ username: englishUsernameInput, password: passwordInput })).mutation(async ({ input }) => {
+      const user = await db.createLocalUser({ username: input.username, name: input.username, passwordHash: await hashPassword(input.password) });
+      return { token: await createLocalSession(user), user: { id: user.id, username: user.username, name: user.name, role: user.role, points: user.points } };
     }),
     login: publicProcedure.input(z.object({ username: usernameInput, password: passwordInput })).mutation(async ({ input }) => {
       await ensureBootstrapAdmin();
