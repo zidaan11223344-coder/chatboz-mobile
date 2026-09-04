@@ -1,5 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 import { Image, Pressable, StyleSheet, Text, View, Animated } from "react-native";
 
@@ -34,7 +35,7 @@ export function ChatMessageBubble({ message, mine }: { message: RealChatMessage;
   return (
     <Animated.View style={[styles.row, mine ? styles.mineRow : styles.otherRow, { transform: [{ translateY }, { translateX }], opacity }]}>
       <View style={styles.meta}>
-        <Text style={[styles.senderName, mine ? styles.senderMine : styles.senderOther]} numberOfLines={1}>{sender}</Text>
+        <Pressable onPress={() => router.push({ pathname: "/profile/[id]", params: { id: String(message.senderId) } })}><Text style={[styles.senderName, mine ? styles.senderMine : styles.senderOther]} numberOfLines={1}>{sender}</Text></Pressable>
       </View>
       <Animated.View style={[styles.bubble, mine ? styles.mineBubble : styles.otherBubble, message.kind === "image" && styles.imageBubble]}>
         {message.kind === "text" && <Text style={[styles.body, message.textColor ? { color: message.textColor } : mine ? undefined : { color: "#111" }]}>{message.body}</Text>}

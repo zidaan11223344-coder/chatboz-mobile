@@ -42,7 +42,7 @@ export const roomMembers = mysqlTable("roomMembers", {
   id: int("id").autoincrement().primaryKey(),
   roomId: varchar("roomId", { length: 36 }).notNull(),
   userId: int("userId").notNull(),
-  role: mysqlEnum("role", ["owner", "member"]).default("member").notNull(),
+  role: mysqlEnum("role", ["owner", "moderator", "member"]).default("member").notNull(),
   joinedAt: timestamp("joinedAt").defaultNow().notNull(),
 }, (table) => [uniqueIndex("room_member_unique").on(table.roomId, table.userId)]);
 

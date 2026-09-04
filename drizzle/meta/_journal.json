@@ -43,6 +43,13 @@
       "when": 1788007043803,
       "tag": "0005_zippy_rage",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1788559990612,
+      "tag": "0006_aberrant_stryfe",
+      "breakpoints": true
     }
   ]
 }

@@ -69,6 +69,11 @@ export const appRouter = router({
       create: protectedProcedure.input(roomInput).mutation(({ ctx, input }) => db.createRoomForUser({ ownerId: ctx.user.id, ...input })),
       join: protectedProcedure.input(z.object({ roomId: z.string().uuid() })).mutation(({ ctx, input }) => db.joinRoomForUser(input.roomId, ctx.user.id)),
       messages: protectedProcedure.input(z.object({ roomId: z.string().uuid() })).query(({ ctx, input }) => db.listRoomMessages(input.roomId, ctx.user.id)),
+      members: protectedProcedure.input(z.object({ roomId: z.string().uuid() })).query(({ ctx, input }) => db.listRoomMembers(input.roomId, ctx.user.id)),
+      setMemberRole: protectedProcedure.input(z.object({ roomId: z.string().uuid(), userId: z.number().int().positive(), role: z.enum(["moderator", "member"]) })).mutation(({ ctx, input }) => db.setRoomMemberRole(input.roomId, ctx.user.id, input.userId, input.role)),
+    }),
+    profiles: router({
+      get: protectedProcedure.input(z.object({ userId: z.number().int().positive() })).query(({ input }) => db.getPublicProfile(input.userId)),
     }),
     friends: router({
       search: protectedProcedure.input(z.object({ query: z.string().trim().max(90) })).query(({ ctx, input }) => db.searchRealUsers(input.query, ctx.user.id)),

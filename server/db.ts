@@ -16,6 +16,7 @@ import {
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { parseAgentPermissions, serializeAgentPermissions, type AgentPermissions } from "../shared/agent-permissions";
+import { canManageRoomMembers } from "../shared/room-permissions";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -126,6 +127,31 @@ export type RoomSummary = {
   memberCount: number;
   joined: boolean;
 };
+
+export async function getPublicProfile(userId: number) {
+  const db = await requireDb();
+  const [user] = await db.select({ id: users.id, username: users.username, name: users.name, role: users.role, createdAt: users.createdAt }).from(users).where(and(eq(users.id, userId), eq(users.accountStatus, "active"))).limit(1);
+  if (!user) throw new Error("الحساب غير موجود.");
+  const [friendCount] = await db.select({ count: sql<number>`count(*)` }).from(friendRequests).where(and(or(eq(friendRequests.requesterId, userId), eq(friendRequests.addresseeId, userId)), eq(friendRequests.status, "accepted")));
+  return { ...user, name: user.name?.trim() || user.username || "مستخدم", friendsCount: Number(friendCount?.count ?? 0), points: undefined };
+}
+
+export async function listRoomMembers(roomId: string, userId: number) {
+  await assertRoomMember(roomId, userId);
+  const db = await requireDb();
+  const rows = await db.select({ membership: roomMembers, user: users }).from(roomMembers).innerJoin(users, eq(roomMembers.userId, users.id)).where(and(eq(roomMembers.roomId, roomId), eq(users.accountStatus, "active"))).orderBy(roomMembers.role, users.name);
+  return rows.map(({ membership, user }) => ({ id: membership.id, userId: user.id, username: user.username, name: user.name?.trim() || user.username || "مستخدم", role: membership.role }));
+}
+
+export async function setRoomMemberRole(roomId: string, actorId: number, targetUserId: number, role: "moderator" | "member") {
+  const db = await requireDb();
+  const [room] = await db.select({ ownerId: rooms.ownerId }).from(rooms).where(eq(rooms.id, roomId)).limit(1);
+  if (!room || !canManageRoomMembers((room.ownerId === actorId ? "owner" : "member"))) throw new Error("مالك الغرفة فقط يستطيع إدارة أدوار الأعضاء.");
+  const [target] = await db.select({ id: roomMembers.id, role: roomMembers.role }).from(roomMembers).where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, targetUserId))).limit(1);
+  if (!target) throw new Error("المستخدم ليس عضوًا في هذه الغرفة.");
+  if (target.role === "owner") throw new Error("لا يمكن تغيير دور مالك الغرفة.");
+  await db.update(roomMembers).set({ role }).where(eq(roomMembers.id, target.id));
+}
 
 export async function listRoomsForUser(userId: number): Promise<RoomSummary[]> {
   const db = await requireDb();
@@ -343,13 +369,15 @@ async function assertRoomMember(roomId: string, userId: number) {
 export async function listConversationMessages(conversationId: string, userId: number) {
   await assertConversationMember(conversationId, userId);
   const db = await requireDb();
-  return db.select().from(chatMessages).where(eq(chatMessages.conversationId, conversationId)).orderBy(chatMessages.createdAt).limit(100);
+  const rows = await db.select({ message: chatMessages, sender: users }).from(chatMessages).innerJoin(users, eq(chatMessages.senderId, users.id)).where(eq(chatMessages.conversationId, conversationId)).orderBy(chatMessages.createdAt).limit(100);
+  return rows.map(({ message, sender }) => ({ ...message, senderName: sender.name?.trim() || sender.username || "مستخدم", senderUsername: sender.username }));
 }
 
 export async function listRoomMessages(roomId: string, userId: number) {
   await assertRoomMember(roomId, userId);
   const db = await requireDb();
-  return db.select().from(chatMessages).where(eq(chatMessages.roomId, roomId)).orderBy(chatMessages.createdAt).limit(100);
+  const rows = await db.select({ message: chatMessages, sender: users }).from(chatMessages).innerJoin(users, eq(chatMessages.senderId, users.id)).where(eq(chatMessages.roomId, roomId)).orderBy(chatMessages.createdAt).limit(100);
+  return rows.map(({ message, sender }) => ({ ...message, senderName: sender.name?.trim() || sender.username || "مستخدم", senderUsername: sender.username }));
 }
 
 export async function createMessage(input: {
