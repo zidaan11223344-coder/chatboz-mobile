@@ -62,6 +62,13 @@ export const directConversations = mysqlTable("directConversations", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [uniqueIndex("direct_conversation_unique").on(table.firstUserId, table.secondUserId)]);
 
+export const blockedUsers = mysqlTable("blockedUsers", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  blockerId: int("blockerId").notNull(),
+  blockedId: int("blockedId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [uniqueIndex("blocked_user_unique").on(table.blockerId, table.blockedId)]);
+
 export const notifications = mysqlTable("notifications", {
   id: varchar("id", { length: 36 }).primaryKey(),
   recipientId: int("recipientId").notNull(),

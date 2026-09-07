@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import {
   chatMessages,
   directConversations,
+  blockedUsers,
   friendRequests,
   notifications,
   storeProducts,
@@ -128,6 +129,22 @@ export type RoomSummary = {
   joined: boolean;
 };
 
+export async function getBlockStatus(viewerId: number, targetId: number) {
+  const db = await requireDb();
+  const [outgoing] = await db.select({ id: blockedUsers.id }).from(blockedUsers).where(and(eq(blockedUsers.blockerId, viewerId), eq(blockedUsers.blockedId, targetId))).limit(1);
+  const [incoming] = await db.select({ id: blockedUsers.id }).from(blockedUsers).where(and(eq(blockedUsers.blockerId, targetId), eq(blockedUsers.blockedId, viewerId))).limit(1);
+  return { blockedByMe: Boolean(outgoing), blockedMe: Boolean(incoming) };
+}
+
+export async function setUserBlocked(blockerId: number, blockedId: number, blocked: boolean) {
+  if (blockerId === blockedId) throw new Error("لا يمكنك حظر حسابك.");
+  const db = await requireDb();
+  const [target] = await db.select({ id: users.id, accountStatus: users.accountStatus }).from(users).where(eq(users.id, blockedId)).limit(1);
+  if (!target || target.accountStatus !== "active") throw new Error("الحساب غير متاح.");
+  if (blocked) await db.insert(blockedUsers).values({ id: crypto.randomUUID(), blockerId, blockedId }).onDuplicateKeyUpdate({ set: { blockedId } });
+  else await db.delete(blockedUsers).where(and(eq(blockedUsers.blockerId, blockerId), eq(blockedUsers.blockedId, blockedId)));
+}
+
 export async function getPublicProfile(userId: number) {
   const db = await requireDb();
   const [user] = await db.select({ id: users.id, username: users.username, name: users.name, role: users.role, createdAt: users.createdAt }).from(users).where(and(eq(users.id, userId), eq(users.accountStatus, "active"))).limit(1);
@@ -236,6 +253,8 @@ export async function listFriendsForUser(userId: number) {
 
 export async function requestFriendship(requesterId: number, addresseeId: number) {
   if (requesterId === addresseeId) throw new Error("لا يمكنك إضافة حسابك كصديق.");
+  const blockStatus = await getBlockStatus(requesterId, addresseeId);
+  if (blockStatus.blockedByMe || blockStatus.blockedMe) throw new Error("لا يمكن إرسال طلب صداقة أثناء وجود حظر.");
   const db = await requireDb();
   const [target] = await db.select({ id: users.id }).from(users).where(eq(users.id, addresseeId)).limit(1);
   if (!target) throw new Error("الحساب المطلوب غير موجود.");
@@ -309,6 +328,8 @@ async function assertFriendship(userId: number, otherUserId: number) {
 }
 
 export async function getOrCreateDirectConversation(userId: number, otherUserId: number) {
+  const blockStatus = await getBlockStatus(userId, otherUserId);
+  if (blockStatus.blockedByMe || blockStatus.blockedMe) throw new Error("لا يمكن بدء محادثة أثناء وجود حظر.");
   await assertFriendship(userId, otherUserId);
   const db = await requireDb();
   const [firstUserId, secondUserId] = [userId, otherUserId].sort((a, b) => a - b);
@@ -354,6 +375,9 @@ async function assertConversationMember(conversationId: string, userId: number) 
   const db = await requireDb();
   const [conversation] = await db.select().from(directConversations).where(eq(directConversations.id, conversationId)).limit(1);
   if (!conversation || (conversation.firstUserId !== userId && conversation.secondUserId !== userId)) throw new Error("لا تملك صلاحية هذه المحادثة.");
+  const otherUserId = conversation.firstUserId === userId ? conversation.secondUserId : conversation.firstUserId;
+  const blockStatus = await getBlockStatus(userId, otherUserId);
+  if (blockStatus.blockedByMe || blockStatus.blockedMe) throw new Error("تم إيقاف التفاعل بسبب الحظر.");
 }
 
 async function assertRoomMember(roomId: string, userId: number) {

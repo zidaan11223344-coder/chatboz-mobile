@@ -74,6 +74,8 @@ export const appRouter = router({
     }),
     profiles: router({
       get: protectedProcedure.input(z.object({ userId: z.number().int().positive() })).query(({ input }) => db.getPublicProfile(input.userId)),
+      blockStatus: protectedProcedure.input(z.object({ userId: z.number().int().positive() })).query(({ ctx, input }) => db.getBlockStatus(ctx.user.id, input.userId)),
+      setBlocked: protectedProcedure.input(z.object({ userId: z.number().int().positive(), blocked: z.boolean() })).mutation(({ ctx, input }) => db.setUserBlocked(ctx.user.id, input.userId, input.blocked)),
     }),
     friends: router({
       search: protectedProcedure.input(z.object({ query: z.string().trim().max(90) })).query(({ ctx, input }) => db.searchRealUsers(input.query, ctx.user.id)),

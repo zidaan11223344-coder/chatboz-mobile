@@ -50,6 +50,13 @@
       "when": 1788559990612,
       "tag": "0006_aberrant_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1788785654865,
+      "tag": "0007_unusual_rocket_racer",
+      "breakpoints": true
     }
   ]
 }
