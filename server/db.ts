@@ -419,8 +419,11 @@ const STORE_COLORS = ["#32CD32", "#8F86F5", "#F6B6C2", "#F6A800", "#F27B72", "#7
 async function ensureStoreProducts() {
   const db = await requireDb();
   const [row] = await db.select({ count: sql<number>`count(*)` }).from(storeProducts);
-  if (Number(row?.count ?? 0) > 0) return;
-  await db.insert(storeProducts).values(STORE_COLORS.map((color, index) => ({ id: crypto.randomUUID(), code: `A-${index + 1}`, label: `Color A-${index + 1}`, colorHex: color, pointsCost: 5000, validityDays: 30, active: true })));
+  if (Number(row?.count ?? 0) > 0) {
+    await db.update(storeProducts).set({ pointsCost: 0, validityDays: 3650 }).where(like(storeProducts.code, "A-%"));
+    return;
+  }
+  await db.insert(storeProducts).values(STORE_COLORS.map((color, index) => ({ id: crypto.randomUUID(), code: `A-${index + 1}`, label: `Color A-${index + 1}`, colorHex: color, pointsCost: 0, validityDays: 3650, active: true })));
 }
 
 export async function listStoreProducts() {
@@ -440,12 +443,10 @@ export async function purchaseStoreProduct(userId: number, productId: string) {
     const [user] = await tx.select().from(users).where(and(eq(users.id, userId), eq(users.accountStatus, "active"))).limit(1);
     const [product] = await tx.select().from(storeProducts).where(and(eq(storeProducts.id, productId), eq(storeProducts.active, true))).limit(1);
     if (!user || !product) throw new Error("العنصر أو الحساب غير متاح.");
-    if (user.points < product.pointsCost) throw new Error("رصيد النقاط غير كافٍ.");
     const now = new Date();
     const expiresAt = new Date(now.getTime() + product.validityDays * 24 * 60 * 60 * 1000);
-    await tx.update(users).set({ points: user.points - product.pointsCost }).where(eq(users.id, userId));
     await tx.insert(userProducts).values({ id: crypto.randomUUID(), userId, productId: product.id, expiresAt }).onDuplicateKeyUpdate({ set: { expiresAt } });
-    return { product, points: user.points - product.pointsCost, expiresAt };
+    return { product: { ...product, pointsCost: 0 }, points: user.points, expiresAt };
   });
 }
 
@@ -512,8 +513,6 @@ export async function transferPoints(input: { adminId: number; recipientId: numb
     const [admin] = await tx.select().from(users).where(and(eq(users.id, input.adminId), eq(users.role, "admin"), eq(users.accountStatus, "active"))).limit(1);
     const [recipient] = await tx.select().from(users).where(and(eq(users.id, input.recipientId), eq(users.accountStatus, "active"))).limit(1);
     if (!admin || !recipient) throw new Error("الحساب المطلوب غير متاح.");
-    if (admin.points < input.amount) throw new Error("رصيد المدير غير كافٍ للتحويل.");
-    await tx.update(users).set({ points: admin.points - input.amount }).where(eq(users.id, input.adminId));
     await tx.update(users).set({ points: recipient.points + input.amount }).where(eq(users.id, input.recipientId));
     await tx.insert(pointTransfers).values({ id: crypto.randomUUID(), adminId: input.adminId, recipientId: input.recipientId, amount: input.amount, note: input.note?.trim() || null });
   });

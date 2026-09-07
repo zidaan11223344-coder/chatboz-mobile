@@ -140,7 +140,7 @@ export const appRouter = router({
       await db.removeRoom(input.roomId);
       return { success: true } as const;
     }),
-    transferPoints: adminProcedure.input(z.object({ recipientId: z.number().int().positive(), amount: z.number().int().positive().max(1_000_000), note: z.string().trim().max(180).optional() })).mutation(async ({ ctx, input }) => {
+    transferPoints: adminProcedure.input(z.object({ recipientId: z.number().int().positive(), amount: z.number().int().positive(), note: z.string().trim().max(180).optional() })).mutation(async ({ ctx, input }) => {
       await db.transferPoints({ adminId: ctx.user.id, ...input });
       return { success: true } as const;
     }),
