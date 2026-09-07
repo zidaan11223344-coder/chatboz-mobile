@@ -15,7 +15,7 @@ function toMediaUrl(url: string | null) {
   return `${getApiBaseUrl()}${url}`;
 }
 
-export function ChatMessageBubble({ message, mine }: { message: RealChatMessage; mine: boolean }) {
+export function ChatMessageBubble({ message, mine, onLongPressSender }: { message: RealChatMessage; mine: boolean; onLongPressSender?: (sender: { id: number; name: string }) => void }) {
   const source = message.kind === "audio" ? toMediaUrl(message.attachmentUrl) : null;
   const player = useAudioPlayer(source);
   const status = useAudioPlayerStatus(player);
@@ -35,7 +35,7 @@ export function ChatMessageBubble({ message, mine }: { message: RealChatMessage;
   return (
     <Animated.View style={[styles.row, mine ? styles.mineRow : styles.otherRow, { transform: [{ translateY }, { translateX }], opacity }]}>
       <View style={styles.meta}>
-        <Pressable onPress={() => router.push({ pathname: "/profile/[id]", params: { id: String(message.senderId) } })}><Text style={[styles.senderName, mine ? styles.senderMine : styles.senderOther]} numberOfLines={1}>{sender}</Text></Pressable>
+        <Pressable onPress={() => router.push({ pathname: "/profile/[id]", params: { id: String(message.senderId) } })} onLongPress={() => onLongPressSender?.({ id: message.senderId, name: sender })} delayLongPress={450}><Text style={[styles.senderName, mine ? styles.senderMine : styles.senderOther]} numberOfLines={1}>{sender}</Text></Pressable>
       </View>
       <Animated.View style={[styles.bubble, mine ? styles.mineBubble : styles.otherBubble, message.kind === "image" && styles.imageBubble]}>
         {message.kind === "text" && <Text style={[styles.body, message.textColor ? { color: message.textColor } : mine ? undefined : { color: "#111" }]}>{message.body}</Text>}
