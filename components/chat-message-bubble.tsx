@@ -1,8 +1,9 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import * as Clipboard from "expo-clipboard";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
-import { Image, Pressable, StyleSheet, Text, View, Animated } from "react-native";
+import { Alert, Image, Pressable, StyleSheet, Text, View, Animated } from "react-native";
 
 import { buzzColors } from "@/components/buzz-ui";
 import { getApiBaseUrl } from "@/constants/oauth";
@@ -21,6 +22,11 @@ export function ChatMessageBubble({ message, mine, onLongPressSender }: { messag
   const status = useAudioPlayerStatus(player);
   const time = new Date(message.createdAt).toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit" });
   const sender = (message as any).senderName ?? (message as any).sender?.name ?? (message as any).displayName ?? "مستخدم";
+  const copyMessage = async () => {
+    if (!message.body || message.kind !== "text") return;
+    try { await Clipboard.setStringAsync(message.body); Alert.alert("تم النسخ", "تم نسخ الرسالة إلى الحافظة."); }
+    catch { Alert.alert("تعذر النسخ", "اسمح للتطبيق بالوصول إلى الحافظة ثم حاول مرة أخرى."); }
+  };
 
   const mounted = useRef(new Animated.Value(0)).current;
 
@@ -37,7 +43,7 @@ export function ChatMessageBubble({ message, mine, onLongPressSender }: { messag
       <View style={styles.meta}>
         <Pressable onPress={() => router.push({ pathname: "/profile/[id]", params: { id: String(message.senderId) } })} onLongPress={() => onLongPressSender?.({ id: message.senderId, name: sender })} delayLongPress={450}><Text style={[styles.senderName, mine ? styles.senderMine : styles.senderOther]} numberOfLines={1}>{sender}</Text></Pressable>
       </View>
-      <Animated.View style={[styles.bubble, mine ? styles.mineBubble : styles.otherBubble, message.kind === "image" && styles.imageBubble]}>
+      <Pressable onLongPress={() => void copyMessage()} delayLongPress={450}><Animated.View style={[styles.bubble, mine ? styles.mineBubble : styles.otherBubble, message.kind === "image" && styles.imageBubble]}>
         {message.kind === "text" && <Text style={[styles.body, message.textColor ? { color: message.textColor } : mine ? undefined : { color: "#111" }]}>{message.body}</Text>}
         {message.kind === "image" && message.attachmentUrl ? <Image source={{ uri: toMediaUrl(message.attachmentUrl) }} style={styles.image} /> : null}
         {message.kind === "audio" && (
@@ -47,7 +53,7 @@ export function ChatMessageBubble({ message, mine, onLongPressSender }: { messag
           </Pressable>
         )}
         <Text style={[styles.time, mine ? { color: "rgba(255,255,255,0.85)" } : { color: "#9B9B9B" }]}>{time}</Text>
-      </Animated.View>
+      </Animated.View></Pressable>
     </Animated.View>
   );
 }
